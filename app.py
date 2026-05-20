@@ -81,8 +81,9 @@ def load_knowledge() -> list:
 
 def parse_knowledge(text: str) -> list:
     entries = []
+    # Розбиваємо по ###KEYWORDS### зберігаючи текст перед ним
     blocks = re.split(r"###KEYWORDS###", text)
-    for block in blocks:
+    for i, block in enumerate(blocks):
         if "###ANSWER###" not in block:
             continue
         parts = block.split("###ANSWER###")
@@ -92,15 +93,22 @@ def parse_knowledge(text: str) -> list:
         answer_raw = parts[1].strip()
         # Обрізаємо answer до наступного роздільника
         answer = re.split(r"\n---\n|\n###", answer_raw)[0].strip().rstrip("-").strip()
-        # Заголовок = перший рядок до першої коми (оригінальний регістр)
-        first_line = keywords_raw.split("\n")[0].strip()
-        title = first_line.split(",")[0].strip()
-        if not title:
-            title = "Без назви"
-        # Якщо є ###ANSWER### з <b>заголовок</b> — беремо його
-        b_match = re.search(r"<b>(.*?)</b>", parts[1])
-        if b_match:
-            title = b_match.group(1).strip()
+
+        # Шукаємо заголовок: # Назва перед ###KEYWORDS###
+        prev_block = blocks[i - 1] if i > 0 else ""
+        h_match = re.search(r"#\s+(.+)$", prev_block.strip(), re.MULTILINE)
+        if h_match:
+            title = h_match.group(1).strip()
+        else:
+            # Якщо є <b>заголовок</b> в answer
+            b_match = re.search(r"<b>(.*?)</b>", answer)
+            if b_match:
+                title = b_match.group(1).strip()
+            else:
+                # Fallback — перший рядок keywords до першої коми
+                first_line = keywords_raw.split("\n")[0].strip()
+                title = first_line.split(",")[0].strip() or "Без назви"
+
         keywords = [w.strip().lower() for w in re.split(r"[,\s]+", keywords_raw) if len(w.strip()) > 1]
         if keywords and answer:
             entries.append({"title": title, "keywords": keywords, "answer": answer})

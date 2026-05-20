@@ -81,42 +81,45 @@ def load_knowledge() -> list:
 
 def parse_knowledge(text: str) -> list:
     entries = []
-    # Розбиваємо по ###KEYWORDS### зберігаючи текст перед ним
-    blocks = re.split(r"###KEYWORDS###", text)
-    for i, block in enumerate(blocks):
-        if "###ANSWER###" not in block:
+    sections = re.split(r"\n?###KEYWORDS###\n?", text)
+    for i, section in enumerate(sections):
+        if "###ANSWER###" not in section:
             continue
-        parts = block.split("###ANSWER###")
+        parts = section.split("###ANSWER###", 1)
         if len(parts) < 2:
             continue
         keywords_raw = parts[0].strip()
         answer_raw = parts[1].strip()
-        # Обрізаємо answer до наступного роздільника
-        answer = re.split(r"\n---\n|\n###", answer_raw)[0].strip().rstrip("-").strip()
+        # Обрізаємо answer до наступного ---
+        answer = re.split(r"\n---\n", answer_raw)[0].strip()
 
-        # Шукаємо заголовок: останній # рядок перед ###KEYWORDS###
-        prev_block = blocks[i - 1] if i > 0 else ""
-        # Беремо тільки текст після останнього ###ANSWER### в попередньому блоці
-        if "###ANSWER###" in prev_block:
-            prev_text = prev_block.split("###ANSWER###")[-1]
+        # Заголовок: шукаємо # в тексті між попередньою відповіддю і поточним ###KEYWORDS###
+        prev = sections[i - 1] if i > 0 else ""
+        if "###ANSWER###" in prev:
+            after_answer = prev.split("###ANSWER###")[-1]
         else:
-            prev_text = prev_block
-        h_match = re.search(r"#\s+(.+)$", prev_text.strip(), re.MULTILINE)
+            after_answer = prev
+        h_match = re.search(r"^#\s+(.+)$", after_answer, re.MULTILINE)
+
         if h_match:
             title = h_match.group(1).strip()
         else:
-            # Якщо є <b>заголовок</b> в answer
             b_match = re.search(r"<b>(.*?)</b>", answer)
             if b_match:
                 title = b_match.group(1).strip()
             else:
-                # Fallback — перший рядок keywords до першої коми
-                first_line = keywords_raw.split("\n")[0].strip()
-                title = first_line.split(",")[0].strip() or "Без назви"
+                for line in keywords_raw.split("\n"):
+                    line = line.strip()
+                    if line:
+                        title = line.split(",")[0].strip()
+                        break
+                else:
+                    title = "Без назви"
 
-        keywords = [w.strip().lower() for w in re.split(r"[,\s]+", keywords_raw) if len(w.strip()) > 1]
-        if keywords and answer:
-            entries.append({"title": title, "keywords": keywords, "answer": answer})
+        # Keywords через кому — зберігаємо фрази
+        kw_list = [k.strip().lower() for k in keywords_raw.split(",") if k.strip()]
+        if kw_list and answer:
+            entries.append({"title": title, "keywords": kw_list, "answer": answer})
     return entries
 
 def search_knowledge(query: str) -> list:
@@ -126,14 +129,12 @@ def search_knowledge(query: str) -> list:
     for entry in KNOWLEDGE:
         for kw in entry["keywords"]:
             kw = kw.strip()
-            # Точний збіг або запит містить keyword як цілу фразу
             if q == kw or q.startswith(kw + " ") or q.endswith(" " + kw) or (" " + kw + " ") in q:
                 if entry["title"] not in seen:
                     seen.add(entry["title"])
                     matches.append(entry)
                 break
-            # Або keyword містить запит як цілу фразу
-            if kw == q or kw.startswith(q + " ") or kw.endswith(" " + q) or (" " + q + " ") in kw:
+            if kw.startswith(q + " ") or kw.endswith(" " + q) or (" " + q + " ") in kw:
                 if entry["title"] not in seen:
                     seen.add(entry["title"])
                     matches.append(entry)
@@ -245,7 +246,6 @@ async def webhook(request: Request):
             chat_id     = callback["message"]["chat"]["id"]
             cb_data     = callback["data"]
 
-            # Кнопка "Не те що шукав" → іде в Groq
             if cb_data.startswith("notfound_"):
                 user_id = int(cb_data.split("_")[1])
                 last = get_history(user_id)
@@ -263,8 +263,7 @@ async def webhook(request: Request):
                 matches = pending_answers.get(user_id, [])
                 if matches and idx < len(matches):
                     answer = matches[idx]["answer"]
-                    if not send_message(chat_id, answer):
-                        send_message(chat_id, groq_web_answer(user_id, answer))
+                    send_message(chat_id, answer)
                     add_to_history(user_id, "assistant", answer)
             except Exception as e:
                 logging.error(f"Callback помилка: {e}")
@@ -317,8 +316,6 @@ async def webhook(request: Request):
 
         if len(matches) == 1:
             pending_answers[user_id] = matches
-            answer = matches[0]["answer"]
-            add_to_history(user_id, "assistant", answer)
             keyboard = [
                 [InlineKeyboardButton(text=matches[0]["title"], callback_data=f"ans_{user_id}_0")],
                 [InlineKeyboardButton(text="❌ Не те, що шукав", callback_data=f"notfound_{user_id}")]

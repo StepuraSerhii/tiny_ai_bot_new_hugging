@@ -6,3 +6,4 @@ ddgs
 requests
 Pillow
 groq
+Pillow

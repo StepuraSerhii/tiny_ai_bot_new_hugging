@@ -24,7 +24,7 @@ groq_client = Groq(api_key=GROQ_API_KEY)
 # ────────────────────────────────────────────
 def send_message(chat_id: int, text: str, reply_markup=None) -> bool:
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text}
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
     if reply_markup:
         payload["reply_markup"] = reply_markup.to_dict()
     try:
@@ -32,7 +32,7 @@ def send_message(chat_id: int, text: str, reply_markup=None) -> bool:
         if r.status_code == 200:
             logging.info("send_message OK")
             return True
-        logging.error(f"send_message статус: {r.status_code}")
+        logging.error(f"send_message статус: {r.status_code} {r.text}")
         return False
     except Exception as e:
         logging.error(f"send_message помилка: {e}")

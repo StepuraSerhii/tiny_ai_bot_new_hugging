@@ -125,8 +125,15 @@ def search_knowledge(query: str) -> list:
     seen = set()
     for entry in KNOWLEDGE:
         for kw in entry["keywords"]:
-            # Точний збіг фрази або фраза входить в запит
-            if q == kw or kw in q or q in kw:
+            kw = kw.strip()
+            # Точний збіг або запит містить keyword як цілу фразу
+            if q == kw or q.startswith(kw + " ") or q.endswith(" " + kw) or (" " + kw + " ") in q:
+                if entry["title"] not in seen:
+                    seen.add(entry["title"])
+                    matches.append(entry)
+                break
+            # Або keyword містить запит як цілу фразу
+            if kw == q or kw.startswith(q + " ") or kw.endswith(" " + q) or (" " + q + " ") in kw:
                 if entry["title"] not in seen:
                     seen.add(entry["title"])
                     matches.append(entry)

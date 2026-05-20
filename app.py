@@ -94,9 +94,14 @@ def parse_knowledge(text: str) -> list:
         # Обрізаємо answer до наступного роздільника
         answer = re.split(r"\n---\n|\n###", answer_raw)[0].strip().rstrip("-").strip()
 
-        # Шукаємо заголовок: # Назва перед ###KEYWORDS###
+        # Шукаємо заголовок: останній # рядок перед ###KEYWORDS###
         prev_block = blocks[i - 1] if i > 0 else ""
-        h_match = re.search(r"#\s+(.+)$", prev_block.strip(), re.MULTILINE)
+        # Беремо тільки текст після останнього ###ANSWER### в попередньому блоці
+        if "###ANSWER###" in prev_block:
+            prev_text = prev_block.split("###ANSWER###")[-1]
+        else:
+            prev_text = prev_block
+        h_match = re.search(r"#\s+(.+)$", prev_text.strip(), re.MULTILINE)
         if h_match:
             title = h_match.group(1).strip()
         else:
@@ -115,23 +120,23 @@ def parse_knowledge(text: str) -> list:
     return entries
 
 def search_knowledge(query: str) -> list:
-    query_words = [w.lower() for w in re.split(r"[\s,]+", query) if len(w) >= 2]
-    if not query_words:
-        return []
+    query = query.lower().strip()
     matches = []
     seen = set()
     for entry in KNOWLEDGE:
-        for qw in query_words:
-            for kw in entry["keywords"]:
-                # Тільки точний збіг слова
-                if qw == kw:
-                    if entry["title"] not in seen:
-                        seen.add(entry["title"])
-                        matches.append(entry)
-                    break
-            else:
-                continue
-            break
+        for kw in entry["keywords"]:
+            # Точний збіг запиту з keyword
+            if query == kw:
+                if entry["title"] not in seen:
+                    seen.add(entry["title"])
+                    matches.append(entry)
+                break
+            # Або keyword повністю входить в запит
+            if kw in query and len(kw) >= 3:
+                if entry["title"] not in seen:
+                    seen.add(entry["title"])
+                    matches.append(entry)
+                break
     logging.info(f"Пошук '{query}': {len(matches)} збігів")
     return matches
 

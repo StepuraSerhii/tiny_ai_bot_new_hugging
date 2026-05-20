@@ -103,7 +103,7 @@ def parse_knowledge(text: str) -> list:
     return entries
 
 def search_knowledge(query: str) -> list:
-    query_words = [w.lower() for w in re.split(r"[\s,]+", query) if len(w) >= 4]
+    query_words = [w.lower() for w in re.split(r"[\s,]+", query) if len(w) >= 2]
     if not query_words:
         return []
     matches = []
@@ -310,7 +310,7 @@ async def webhook(request: Request):
                 callback_data=f"ans_{user_id}_{i}"
             )] for i, m in enumerate(matches)]
             keyboard.append([InlineKeyboardButton(
-                text="❌ Не те, що шукав",
+                text="❌ Не те, що шукав знайди в інтернеті",
                 callback_data=f"notfound_{user_id}"
             )])
             send_message(chat_id,

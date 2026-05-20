@@ -103,13 +103,16 @@ def parse_knowledge(text: str) -> list:
     return entries
 
 def search_knowledge(query: str) -> list:
-    query_words = [w.lower() for w in re.split(r"[\s,]+", query) if len(w) > 1]
+    query_words = [w.lower() for w in re.split(r"[\s,]+", query) if len(w) >= 4]
+    if not query_words:
+        return []
     matches = []
     seen = set()
     for entry in KNOWLEDGE:
         for qw in query_words:
             for kw in entry["keywords"]:
-                if qw in kw or kw in qw:
+                # Тільки точний збіг слова
+                if qw == kw:
                     if entry["title"] not in seen:
                         seen.add(entry["title"])
                         matches.append(entry)
@@ -217,6 +220,18 @@ async def webhook(request: Request):
             callback_id = callback["id"]
             chat_id     = callback["message"]["chat"]["id"]
             cb_data     = callback["data"]
+
+            # Кнопка "Не те що шукав" → іде в Groq
+            if cb_data.startswith("notfound_"):
+                user_id = int(cb_data.split("_")[1])
+                last = get_history(user_id)
+                query = last[-1]["content"] if last else ""
+                answer = groq_web_answer(user_id, query)
+                add_to_history(user_id, "assistant", answer)
+                send_message(chat_id, answer)
+                answer_callback(callback_id)
+                return {"ok": True}
+
             try:
                 _, uid_str, idx_str = cb_data.split("_")
                 user_id = int(uid_str)
@@ -277,9 +292,16 @@ async def webhook(request: Request):
         matches = search_knowledge(text)
 
         if len(matches) == 1:
+            pending_answers[user_id] = matches
             answer = matches[0]["answer"]
             add_to_history(user_id, "assistant", answer)
-            send_message(chat_id, answer)
+            keyboard = [
+                [InlineKeyboardButton(text=matches[0]["title"], callback_data=f"ans_{user_id}_0")],
+                [InlineKeyboardButton(text="❌ Не те, що шукав", callback_data=f"notfound_{user_id}")]
+            ]
+            send_message(chat_id,
+                "🔍 Знайшов варіант — обери потрібний:",
+                reply_markup=InlineKeyboardMarkup(keyboard))
 
         elif len(matches) > 1:
             pending_answers[user_id] = matches
@@ -287,6 +309,10 @@ async def webhook(request: Request):
                 text=m["title"],
                 callback_data=f"ans_{user_id}_{i}"
             )] for i, m in enumerate(matches)]
+            keyboard.append([InlineKeyboardButton(
+                text="❌ Не те, що шукав",
+                callback_data=f"notfound_{user_id}"
+            )])
             send_message(chat_id,
                 "🔍 Знайшов кілька варіантів — обери потрібний:",
                 reply_markup=InlineKeyboardMarkup(keyboard))

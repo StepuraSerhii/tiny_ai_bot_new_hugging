@@ -89,7 +89,9 @@ def parse_knowledge(text: str) -> list:
         if len(parts) < 2:
             continue
         keywords_raw = parts[0].strip()
-        answer = parts[1].strip()
+        answer_raw = parts[1].strip()
+        # Обрізаємо answer до наступного роздільника
+        answer = re.split(r"\n---\n|\n###", answer_raw)[0].strip()
         # Заголовок = перший рядок до першої коми
         first_line = keywords_raw.split("\n")[0].strip()
         title = first_line.split(",")[0].strip()

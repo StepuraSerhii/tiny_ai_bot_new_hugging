@@ -120,22 +120,17 @@ def parse_knowledge(text: str) -> list:
     return entries
 
 def search_knowledge(query: str) -> list:
-    query_words = [w.lower() for w in re.split(r"[\s,]+", query) if len(w) >= 2]
-    if not query_words:
-        return []
+    q = query.lower().strip()
     matches = []
     seen = set()
     for entry in KNOWLEDGE:
-        for qw in query_words:
-            for kw in entry["keywords"]:
-                if qw == kw:
-                    if entry["title"] not in seen:
-                        seen.add(entry["title"])
-                        matches.append(entry)
-                    break
-            else:
-                continue
-            break
+        for kw in entry["keywords"]:
+            # Точний збіг фрази або фраза входить в запит
+            if q == kw or kw in q or q in kw:
+                if entry["title"] not in seen:
+                    seen.add(entry["title"])
+                    matches.append(entry)
+                break
     logging.info(f"Пошук '{query}': {len(matches)} збігів")
     return matches
 

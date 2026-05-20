@@ -146,7 +146,7 @@ def add_to_history(user_id: int, role: str, content: str):
 def search_web(query: str) -> str:
     try:
         with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=3))
+            results = list(ddgs.text(query, max_results=3, region="ua-uk"))
         if not results:
             return ""
         text = "🔍 Знайдено в інтернеті:\n\n"
@@ -177,8 +177,8 @@ def groq_web_answer(user_id: int, text: str) -> str:
         return "Вибач, не знайшов відповіді ні в базі знань, ні в інтернеті."
     try:
         answer = ask_llm(
-            "Ти корисний асистент. Відповідай ТІЛЬКИ українською мовою. "
-            "Будь структурованим і конкретним.\n\n"
+            "Ти корисний асистент. Відповідай ВИКЛЮЧНО українською мовою. "
+            "Жодного слова іншою мовою. Будь структурованим і конкретним.\n\n"
             f"Інформація з інтернету:\n{web}",
             user_id, text
         )

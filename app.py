@@ -228,20 +228,41 @@ def add_meme_text(image_bytes: bytes, top_text: str, bottom_text: str) -> io.Byt
     return buf
 
 # ────────────────────────────────────────────
-# Переробка стилю через HuggingFace img2img
+# Переробка стилю: Groq описує фото → FLUX генерує в новому стилі
 # ────────────────────────────────────────────
 def restyle_image(image_bytes: bytes, style_prompt: str) -> io.BytesIO | None:
     try:
-        result = hf_client.image_to_image(
-            image=io.BytesIO(image_bytes),
-            prompt=style_prompt,
-            model="timbrooks/instruct-pix2pix",
-            strength=0.75,
+        # Крок 1: Groq vision описує що на фото
+        b64 = photo_to_base64(image_bytes)
+        vision_resp = groq_client.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                    {"type": "text", "text": (
+                        "Describe this image in detail for an AI image generator. "
+                        "Focus on: main subject, composition, lighting, colors, background. "
+                        "Be specific and descriptive. Answer in English only. Max 60 words."
+                    )}
+                ]
+            }],
+            max_tokens=100
+        )
+        description = vision_resp.choices[0].message.content.strip()
+        logging.info(f"Опис фото для restyle: {description}")
+
+        # Крок 2: FLUX генерує нове фото в потрібному стилі
+        full_prompt = f"{description}, {style_prompt}, highly detailed, high quality"
+        image = hf_client.text_to_image(
+            full_prompt,
+            model="black-forest-labs/FLUX.1-schnell"
         )
         buf = io.BytesIO()
-        result.save(buf, format="PNG")
+        image.save(buf, format="PNG")
         buf.seek(0)
         return buf
+
     except Exception as e:
         logging.error(f"restyle_image помилка: {e}")
         return None

@@ -2,12 +2,15 @@ import os
 import logging
 import io
 import re
+import base64
+import textwrap
 import requests
 from fastapi import FastAPI, Request
 from huggingface_hub import InferenceClient, HfApi
 from ddgs import DDGS
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from groq import Groq
+from PIL import Image, ImageDraw, ImageFont
 import uvicorn
 
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +33,6 @@ def send_message(chat_id: int, text: str, reply_markup=None) -> bool:
     try:
         r = requests.post(url, json=payload, timeout=10)
         if r.status_code == 200:
-            logging.info("send_message OK")
             return True
         logging.error(f"send_message статус: {r.status_code} {r.text}")
         return False
@@ -52,6 +54,136 @@ def answer_callback(callback_id: str):
         requests.post(url, json={"callback_query_id": callback_id}, timeout=10)
     except Exception as e:
         logging.error(f"answer_callback помилка: {e}")
+
+# ────────────────────────────────────────────
+# Робота з фото Telegram
+# ────────────────────────────────────────────
+def download_tg_photo(file_id: str) -> bytes:
+    """Завантажує фото з Telegram за file_id, повертає bytes."""
+    # 1. Отримуємо шлях до файлу
+    r = requests.get(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/getFile",
+        params={"file_id": file_id}, timeout=10
+    )
+    file_path = r.json()["result"]["file_path"]
+    # 2. Завантажуємо сам файл
+    r2 = requests.get(
+        f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}",
+        timeout=30
+    )
+    return r2.content
+
+def photo_to_base64(image_bytes: bytes) -> str:
+    """Конвертує bytes картинки у base64 рядок."""
+    return base64.standard_b64encode(image_bytes).decode("utf-8")
+
+# ────────────────────────────────────────────
+# Обробка фото: мем, стиль, опис
+# ────────────────────────────────────────────
+def describe_image(image_bytes: bytes) -> str:
+    """Groq vision — описує що на фото."""
+    b64 = photo_to_base64(image_bytes)
+    response = groq_client.chat.completions.create(
+        model="meta-llama/llama-4-scout-17b-16e-instruct",  # vision модель у Groq
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                {"type": "text", "text": "Опиши детально що зображено на цьому фото. Відповідай українською."}
+            ]
+        }],
+        max_tokens=300
+    )
+    return response.choices[0].message.content
+
+def generate_meme_text(image_bytes: bytes) -> tuple[str, str]:
+    """Groq vision — генерує смішний текст для мему (верх/низ)."""
+    b64 = photo_to_base64(image_bytes)
+    response = groq_client.chat.completions.create(
+        model="meta-llama/llama-4-scout-17b-16e-instruct",
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                {"type": "text", "text": (
+                    "Ти генератор мемів. Подивись на фото і придумай смішний мем-текст.\n"
+                    "Відповідай ТІЛЬКИ у такому форматі (без зайвого тексту):\n"
+                    "ВЕРХ: [текст верхньої частини мему]\n"
+                    "НИЗ: [текст нижньої частини мему]\n"
+                    "Текст має бути українською, коротким і смішним!"
+                )}
+            ]
+        }],
+        max_tokens=100
+    )
+    raw = response.choices[0].message.content
+    top = ""
+    bottom = ""
+    for line in raw.splitlines():
+        if line.upper().startswith("ВЕРХ:"):
+            top = line.split(":", 1)[1].strip()
+        elif line.upper().startswith("НИЗ:"):
+            bottom = line.split(":", 1)[1].strip()
+    if not top and not bottom:
+        top = "Коли просиш бота зробити мем"
+        bottom = "А він намагається 😅"
+    return top, bottom
+
+def add_meme_text(image_bytes: bytes, top_text: str, bottom_text: str) -> io.BytesIO:
+    """Pillow — малює класичний мем-текст на фото."""
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    draw = ImageDraw.Draw(img)
+    w, h = img.size
+
+    # Розмір шрифту — 6% від висоти
+    font_size = max(30, int(h * 0.06))
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
+    except Exception:
+        font = ImageFont.load_default()
+
+    def draw_text_with_outline(text: str, y_ratio: float):
+        lines = textwrap.wrap(text, width=20)
+        for i, line in enumerate(lines):
+            bbox = draw.textbbox((0, 0), line, font=font)
+            lw = bbox[2] - bbox[0]
+            lh = bbox[3] - bbox[1]
+            x = (w - lw) // 2
+            y = int(h * y_ratio) + i * (lh + 4)
+            # Обводка
+            for dx, dy in [(-2,-2),(2,-2),(-2,2),(2,2),(0,-2),(0,2),(-2,0),(2,0)]:
+                draw.text((x+dx, y+dy), line, font=font, fill="black")
+            draw.text((x, y), line, font=font, fill="white")
+
+    draw_text_with_outline(top_text.upper(), 0.02)
+    draw_text_with_outline(bottom_text.upper(), 0.85)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
+
+def restyle_image(image_bytes: bytes, style_prompt: str) -> io.BytesIO:
+    """HuggingFace img2img — переробляє фото у новому стилі."""
+    try:
+        result = hf_client.image_to_image(
+            image=io.BytesIO(image_bytes),
+            prompt=style_prompt,
+            model="timbrooks/instruct-pix2pix",
+            strength=0.75,
+        )
+        buf = io.BytesIO()
+        result.save(buf, format="PNG")
+        buf.seek(0)
+        return buf
+    except Exception as e:
+        logging.error(f"restyle_image помилка: {e}")
+        return None
+
+# ────────────────────────────────────────────
+# Пам'ять для фото (очікування вибору дії)
+# ────────────────────────────────────────────
+pending_photos: dict[int, str] = {}  # user_id -> file_id
 
 # ────────────────────────────────────────────
 # База знань — локальний парсинг і пошук
@@ -90,17 +222,13 @@ def parse_knowledge(text: str) -> list:
             continue
         keywords_raw = parts[0].strip()
         answer_raw = parts[1].strip()
-        # Обрізаємо answer до наступного ---
         answer = re.split(r"\n---\n", answer_raw)[0].strip()
-
-        # Заголовок: шукаємо # в тексті між попередньою відповіддю і поточним ###KEYWORDS###
         prev = sections[i - 1] if i > 0 else ""
         if "###ANSWER###" in prev:
             after_answer = prev.split("###ANSWER###")[-1]
         else:
             after_answer = prev
         h_match = re.search(r"^#\s+(.+)$", after_answer, re.MULTILINE)
-
         if h_match:
             title = h_match.group(1).strip()
         else:
@@ -115,8 +243,6 @@ def parse_knowledge(text: str) -> list:
                         break
                 else:
                     title = "Без назви"
-
-        # Keywords через кому — зберігаємо фрази
         kw_list = [k.strip().lower() for k in keywords_raw.split(",") if k.strip()]
         if kw_list and answer:
             entries.append({"title": title, "keywords": kw_list, "answer": answer})
@@ -139,7 +265,6 @@ def search_knowledge(query: str) -> list:
                     seen.add(entry["title"])
                     matches.append(entry)
                 break
-    logging.info(f"Пошук '{query}': {len(matches)} збігів")
     return matches
 
 KNOWLEDGE = load_knowledge()
@@ -213,7 +338,7 @@ def groq_web_answer(user_id: int, text: str) -> str:
         return web
 
 # ────────────────────────────────────────────
-# Генерація картинки
+# Генерація картинки (text-to-image)
 # ────────────────────────────────────────────
 def generate_image(prompt: str) -> io.BytesIO:
     image = hf_client.text_to_image(
@@ -244,8 +369,44 @@ async def webhook(request: Request):
             callback    = data["callback_query"]
             callback_id = callback["id"]
             chat_id     = callback["message"]["chat"]["id"]
+            user_id     = callback["from"]["id"]
             cb_data     = callback["data"]
 
+            # ── Дії з фото ──
+            if cb_data.startswith("photo_"):
+                _, action, uid_str = cb_data.split("_", 2)
+                uid = int(uid_str)
+                file_id = pending_photos.get(uid)
+                if not file_id:
+                    send_message(chat_id, "Фото не знайдено, надішли ще раз.")
+                    answer_callback(callback_id)
+                    return {"ok": True}
+
+                send_message(chat_id, "⏳ Обробляю фото...")
+                image_bytes = download_tg_photo(file_id)
+
+                if action == "meme":
+                    top, bottom = generate_meme_text(image_bytes)
+                    buf = add_meme_text(image_bytes, top, bottom)
+                    send_photo(chat_id, buf, caption="😂 Твій мем готовий!")
+                    pending_photos.pop(uid, None)
+
+                elif action == "restyle":
+                    send_message(chat_id, "Напиши стиль для переробки (наприклад: <i>anime style</i>, <i>oil painting</i>, <i>cyberpunk</i>):")
+                    pending_photos[uid] = file_id  # зберігаємо для наступного кроку
+                    # Позначаємо що наступне текстове повідомлення — це стиль
+                    chat_history.setdefault(uid, [])
+                    chat_history[uid].append({"role": "system", "content": "__waiting_style__"})
+
+                elif action == "describe":
+                    description = describe_image(image_bytes)
+                    send_message(chat_id, f"🔍 <b>Що на фото:</b>\n\n{description}")
+                    pending_photos.pop(uid, None)
+
+                answer_callback(callback_id)
+                return {"ok": True}
+
+            # ── База знань ──
             if cb_data.startswith("notfound_"):
                 user_id = int(cb_data.split("_")[1])
                 last = get_history(user_id)
@@ -276,7 +437,71 @@ async def webhook(request: Request):
         user_id = message.get("from", {}).get("id")
         text    = message.get("text", "")
 
-        if not text or not chat_id:
+        if not chat_id:
+            return {"ok": True}
+
+        # ── Отримали фото ──
+        if "photo" in message:
+            # Беремо найбільший розмір фото
+            file_id = message["photo"][-1]["file_id"]
+            caption = message.get("caption", "").strip().lower()
+            pending_photos[user_id] = file_id
+
+            # Якщо є підпис — одразу виконуємо дію
+            if caption in ["мем", "meme"]:
+                send_message(chat_id, "⏳ Генерую мем...")
+                image_bytes = download_tg_photo(file_id)
+                top, bottom = generate_meme_text(image_bytes)
+                buf = add_meme_text(image_bytes, top, bottom)
+                send_photo(chat_id, buf, caption="😂 Твій мем готовий!")
+                pending_photos.pop(user_id, None)
+
+            elif caption in ["опис", "describe", "що це"]:
+                send_message(chat_id, "⏳ Аналізую фото...")
+                image_bytes = download_tg_photo(file_id)
+                description = describe_image(image_bytes)
+                send_message(chat_id, f"🔍 <b>Що на фото:</b>\n\n{description}")
+                pending_photos.pop(user_id, None)
+
+            elif caption:
+                # Підпис = стиль для переробки
+                send_message(chat_id, f"⏳ Переробляю у стилі «{caption}»...")
+                image_bytes = download_tg_photo(file_id)
+                buf = restyle_image(image_bytes, caption)
+                if buf:
+                    send_photo(chat_id, buf, caption=f"🎨 Стиль: {caption}")
+                else:
+                    send_message(chat_id, "Не вдалося переробити. Спробуй інший стиль.")
+                pending_photos.pop(user_id, None)
+
+            else:
+                # Без підпису — показуємо меню вибору
+                keyboard = [
+                    [InlineKeyboardButton("😂 Зробити мем", callback_data=f"photo_meme_{user_id}")],
+                    [InlineKeyboardButton("🎨 Змінити стиль", callback_data=f"photo_restyle_{user_id}")],
+                    [InlineKeyboardButton("🔍 Описати фото", callback_data=f"photo_describe_{user_id}")],
+                ]
+                send_message(chat_id, "📸 Що зробити з цим фото?",
+                             reply_markup=InlineKeyboardMarkup(keyboard))
+            return {"ok": True}
+
+        if not text:
+            return {"ok": True}
+
+        # ── Перевіряємо чи очікується стиль для restyle ──
+        history = get_history(user_id)
+        if history and history[-1].get("content") == "__waiting_style__":
+            history.pop()  # видаляємо маркер
+            file_id = pending_photos.get(user_id)
+            if file_id:
+                send_message(chat_id, f"⏳ Переробляю у стилі «{text}»...")
+                image_bytes = download_tg_photo(file_id)
+                buf = restyle_image(image_bytes, text)
+                if buf:
+                    send_photo(chat_id, buf, caption=f"🎨 Стиль: {text}")
+                else:
+                    send_message(chat_id, "Не вдалося переробити. Спробуй інший стиль.")
+                pending_photos.pop(user_id, None)
             return {"ok": True}
 
         if text == "/start":
@@ -286,13 +511,17 @@ async def webhook(request: Request):
                 "• Відповідати з бази знань\n"
                 "• Шукати в інтернеті якщо не знаю\n"
                 "• Генерувати картинки — /img опис\n"
+                "• 😂 Робити меми з твоїх фото\n"
+                "• 🎨 Переробляти фото у новому стилі\n"
+                "• 🔍 Описувати що на фото\n"
                 "• Пам'ятаю розмову\n\n"
-                "Питай що завгодно!")
+                "Надішли фото — і побачиш варіанти!")
             return {"ok": True}
 
         if text == "/clear":
             chat_history[user_id] = []
             pending_answers.pop(user_id, None)
+            pending_photos.pop(user_id, None)
             send_message(chat_id, "🗑 Пам'ять очищена!")
             return {"ok": True}
 
@@ -311,7 +540,6 @@ async def webhook(request: Request):
 
         add_to_history(user_id, "user", text)
 
-        # ── Крок 1: локальний пошук по БЗ ──
         matches = search_knowledge(text)
 
         if len(matches) == 1:
@@ -320,8 +548,7 @@ async def webhook(request: Request):
                 [InlineKeyboardButton(text=matches[0]["title"], callback_data=f"ans_{user_id}_0")],
                 [InlineKeyboardButton(text="❌ Не те, що шукав", callback_data=f"notfound_{user_id}")]
             ]
-            send_message(chat_id,
-                "🔍 Знайшов варіант — обери потрібний:",
+            send_message(chat_id, "🔍 Знайшов варіант — обери потрібний:",
                 reply_markup=InlineKeyboardMarkup(keyboard))
 
         elif len(matches) > 1:
@@ -334,12 +561,10 @@ async def webhook(request: Request):
                 text="❌ Не те, що шукав",
                 callback_data=f"notfound_{user_id}"
             )])
-            send_message(chat_id,
-                "🔍 Знайшов кілька варіантів — обери потрібний:",
+            send_message(chat_id, "🔍 Знайшов кілька варіантів — обери потрібний:",
                 reply_markup=InlineKeyboardMarkup(keyboard))
 
         else:
-            # ── Крок 2: інтернет + Groq ──
             answer = groq_web_answer(user_id, text)
             add_to_history(user_id, "assistant", answer)
             send_message(chat_id, answer)

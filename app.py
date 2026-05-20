@@ -90,8 +90,11 @@ def parse_knowledge(text: str) -> list:
             continue
         keywords_raw = parts[0].strip()
         answer = parts[1].strip()
-        lines = [l.strip() for l in keywords_raw.split("\n") if l.strip()]
-        title = lines[0] if lines else "Без назви"
+        # Заголовок = перший рядок до першої коми
+        first_line = keywords_raw.split("\n")[0].strip()
+        title = first_line.split(",")[0].strip()
+        if not title:
+            title = "Без назви"
         keywords = [w.strip().lower() for w in re.split(r"[,\s]+", keywords_raw) if len(w.strip()) > 1]
         if keywords and answer:
             entries.append({"title": title, "keywords": keywords, "answer": answer})

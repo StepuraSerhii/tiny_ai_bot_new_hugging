@@ -757,6 +757,12 @@ async def _generate_text_meme_and_send(chat_id: int, user_id: int, theme_name: s
         logging.error(f"_generate_text_meme_and_send: {e}")
         send_message(chat_id, f"❌ Помилка: {e}")
 
+def textmeme_skip_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Кнопка 'Придумай сам' під запитом тексту мему."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎲 Придумай сам", callback_data=f"tmskip_{user_id}")]
+    ])
+
 def textmeme_themes_keyboard(user_id: int) -> InlineKeyboardMarkup:
     """Вибір теми для мему без фото."""
     rows = [[InlineKeyboardButton(theme, callback_data=f"tmtheme_{user_id}_{i}")]
@@ -927,7 +933,8 @@ async def webhook(request: Request):
                     edit_message_text(chat_id, message_id,
                         f"✅ Тема: <b>{theme_name}</b>\n"
                         f"✅ Підтема: <b>{subtopic}</b>\n\n"
-                        "✍️ Тепер напиши текст для мему (або просто натисни /skip щоб я придумав сам):")
+                        "✍️ Напиши текст для мему — або натисни кнопку:",
+                        textmeme_skip_keyboard(user_id))
                 else:
                     theme_idx  = int(idx_raw)
                     theme_name = list(MEME_THEMES.keys())[theme_idx]
@@ -950,9 +957,24 @@ async def webhook(request: Request):
                 edit_message_text(chat_id, message_id,
                     f"✅ Тема: <b>{theme_name}</b>\n"
                     f"✅ Підтема: <b>{subtopic}</b>\n\n"
-                    "✍️ Напиши текст для мему — я придумаю смішну картинку і підпис!\n"
-                    "(або /skip — і я сам придумаю все)")
+                    "✍️ Напиши текст для мему — або натисни кнопку:",
+                    textmeme_skip_keyboard(user_id))
                 answer_callback(callback_id)
+                return {"ok": True}
+
+            # ── Текстовий мем: кнопка "Придумай сам" ──
+            if cb_data.startswith("tmskip_"):
+                user_id   = int(cb_data.split("_")[1])
+                meme_data = pending_textmeme.pop(user_id, None)
+                if meme_data:
+                    answer_callback(callback_id)
+                    await _generate_text_meme_and_send(
+                        chat_id, user_id,
+                        meme_data["theme"], meme_data["subtopic"], user_text=""
+                    )
+                else:
+                    edit_message_text(chat_id, message_id, "Спочатку обери тему — натисни /meme")
+                    answer_callback(callback_id)
                 return {"ok": True}
 
             # ── Голосовий підтверджуючий callback ──
@@ -1173,19 +1195,6 @@ async def webhook(request: Request):
         if text in ["/meme", "мем", "зроби мем", "мем!"]:
             send_message(chat_id, "😂 Обери тему для мему:",
                          reply_markup=textmeme_themes_keyboard(user_id))
-            return {"ok": True}
-
-        if text == "/skip":
-            meme_data = pending_textmeme.get(user_id)
-            if meme_data:
-                await _generate_text_meme_and_send(
-                    chat_id, user_id,
-                    meme_data["theme"], meme_data["subtopic"],
-                    user_text=""
-                )
-                pending_textmeme.pop(user_id, None)
-            else:
-                send_message(chat_id, "Спочатку обери тему — /meme")
             return {"ok": True}
 
         if text.startswith("/img"):

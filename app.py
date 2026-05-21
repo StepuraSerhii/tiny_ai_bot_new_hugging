@@ -13,6 +13,7 @@ from ddgs import DDGS
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from groq import Groq
 from PIL import Image, ImageDraw, ImageFont
+from gtts import gTTS
 import uvicorn
 
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +24,64 @@ GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 
 hf_client   = InferenceClient(token=HF_TOKEN)
 groq_client = Groq(api_key=GROQ_API_KEY)
+
+# ────────────────────────────────────────────
+# Режими особистості бота
+# ────────────────────────────────────────────
+BOT_PERSONAS = {
+    "assistant": {
+        "label": "🤖 Асистент",
+        "system": (
+            "Ти корисний асистент служби підтримки. "
+            "Відповідай чітко, по суті, українською мовою. "
+            "Максимум 5 речень."
+        ),
+    },
+    "bro": {
+        "label": "😎 Бро",
+        "system": (
+            "Ти найкращий бро юзера. Розмовляєш як реальний пацан — "
+            "сленг, короткі фрази, іноді матюки (зірочками), емодзі. "
+            "Завжди підтримуєш, але стьобаєш по-дружньому. "
+            "Тільки українська / суржик."
+        ),
+    },
+    "teacher": {
+        "label": "🧑‍🏫 Вчитель",
+        "system": (
+            "Ти терплячий вчитель. Пояснюєш все просто і зрозуміло, "
+            "з прикладами, аналогіями, кроками. Хвалиш за правильні питання. "
+            "Мова — українська, академічна але доступна."
+        ),
+    },
+    "comedian": {
+        "label": "😂 Комік",
+        "system": (
+            "Ти стенд-ап комік. На будь-яке питання відповідаєш з гумором, "
+            "жартами, абсурдом і самоіронією. Навіть серйозні теми перетворюєш "
+            "на жарт. Але в кінці все ж даєш реальну відповідь. Тільки українська."
+        ),
+    },
+    "sage": {
+        "label": "🧙 Мудрець",
+        "system": (
+            "Ти давній мудрець. Відповідаєш глибокодумно, з метафорами, "
+            "притчами, філософськими роздумами. Кожна відповідь — маленька мудрість. "
+            "Мова урочиста, українська."
+        ),
+    },
+    "psychologist": {
+        "label": "🧠 Психолог",
+        "system": (
+            "Ти емпатичний психолог. Уважно слухаєш, ставиш уточнюючі питання, "
+            "допомагаєш розібратися в почуттях і ситуації. Не засуджуєш. "
+            "Даєш практичні поради. Тільки українська."
+        ),
+    },
+}
+
+# user_id -> persona key (default: "assistant")
+user_personas: dict[int, str] = {}
 
 # ────────────────────────────────────────────
 # Кириличний шрифт — завантажуємо при старті
@@ -144,6 +203,18 @@ def send_photo(chat_id: int, photo: io.BytesIO, caption: str = ""):
     except Exception as e:
         logging.error(f"send_photo: {e}")
 
+def send_voice(chat_id: int, voice_buf: io.BytesIO):
+    """Надсилає голосове повідомлення (OGG/MP3)."""
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendVoice",
+            data={"chat_id": chat_id},
+            files={"voice": ("voice.mp3", voice_buf, "audio/mpeg")},
+            timeout=30,
+        )
+    except Exception as e:
+        logging.error(f"send_voice: {e}")
+
 def answer_callback(callback_id: str):
     try:
         requests.post(
@@ -189,6 +260,19 @@ def download_tg_photo(file_id: str) -> bytes:
         timeout=30
     )
     return r2.content
+
+def download_tg_file(file_id: str) -> tuple[bytes, str]:
+    """Повертає (bytes, file_path). Універсальна версія для будь-яких файлів."""
+    r = requests.get(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/getFile",
+        params={"file_id": file_id}, timeout=10
+    )
+    file_path = r.json()["result"]["file_path"]
+    r2 = requests.get(
+        f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}",
+        timeout=60
+    )
+    return r2.content, file_path
 
 def photo_to_base64(image_bytes: bytes) -> str:
     return base64.standard_b64encode(image_bytes).decode("utf-8")
@@ -425,6 +509,7 @@ chat_history:    dict[int, list]         = {}
 pending_answers: dict[int, list]         = {}
 pending_photos:  dict[int, str]          = {}  # user_id -> file_id
 meme_style_sel:  dict[int, int | None]   = {}  # user_id -> style idx або None
+user_voice_reply: dict[int, bool]        = {}  # user_id -> чи відповідати голосом
 
 def get_history(user_id: int) -> list:
     return chat_history.setdefault(user_id, [])
@@ -461,22 +546,69 @@ def ask_llm(system_prompt: str, user_id: int, user_text: str) -> str:
     )
     return response.choices[0].message.content
 
+def ask_llm_persona(user_id: int, user_text: str) -> str:
+    """Питає LLM із урахуванням поточної особистості юзера."""
+    persona_key = user_personas.get(user_id, "assistant")
+    system      = BOT_PERSONAS[persona_key]["system"]
+    return ask_llm(system, user_id, user_text)
+
 def groq_web_answer(user_id: int, text: str) -> str:
     web = search_web(text)
     if not web:
-        return "Вибач, не знайшов відповіді ні в базі знань, ні в інтернеті."
+        # Якщо веб нічого не дав — питаємо LLM напряму з персоною
+        try:
+            return ask_llm_persona(user_id, text)
+        except Exception:
+            return "Вибач, не знайшов відповіді ні в базі знань, ні в інтернеті."
     try:
+        persona_key = user_personas.get(user_id, "assistant")
+        persona_sys = BOT_PERSONAS[persona_key]["system"]
         answer = ask_llm(
-            "Ти корисний асистент служби підтримки. Відповідай ВИКЛЮЧНО українською мовою.\n\n"
-            "1. Коротка чітка відповідь\n2. Тільки релевантна інформація\n"
-            "3. Спочатку суть, потім деталі\n4. Максимум 5 речень\n\n"
-            f"Джерела:\n{web}",
+            persona_sys + f"\n\nДжерела з інтернету:\n{web}",
             user_id, text
         )
         return "🌐 (з інтернету)\n\n" + answer
     except Exception as e:
         logging.error(f"groq_web_answer: {e}")
         return web
+
+# ────────────────────────────────────────────
+# STT: Groq Whisper — войс → текст
+# ────────────────────────────────────────────
+def transcribe_voice(audio_bytes: bytes, filename: str = "voice.ogg") -> str:
+    """Транскрибує аудіо через Groq Whisper."""
+    try:
+        transcription = groq_client.audio.transcriptions.create(
+            model="whisper-large-v3",
+            file=(filename, audio_bytes),
+            language="uk",
+            response_format="text",
+        )
+        return transcription.strip() if isinstance(transcription, str) else transcription.text.strip()
+    except Exception as e:
+        logging.error(f"transcribe_voice: {e}")
+        return ""
+
+# ────────────────────────────────────────────
+# TTS: gTTS — текст → голосове повідомлення
+# ────────────────────────────────────────────
+def text_to_speech(text: str, lang: str = "uk") -> io.BytesIO | None:
+    """Генерує MP3 з тексту через gTTS."""
+    try:
+        # Обрізаємо HTML-теги перед озвучкою
+        clean = re.sub(r"<[^>]+>", "", text)
+        clean = re.sub(r"[🌐🔍⏳❌✅😂🎨📸🖼🗑👋🤖😎🧑‍🏫🧙🧠💬🎙]", "", clean)
+        clean = clean.strip()
+        if not clean:
+            return None
+        tts = gTTS(text=clean[:800], lang=lang, slow=False)
+        buf = io.BytesIO()
+        tts.write_to_fp(buf)
+        buf.seek(0)
+        return buf
+    except Exception as e:
+        logging.error(f"text_to_speech: {e}")
+        return None
 
 # ────────────────────────────────────────────
 # Генерація картинки (text-to-image)
@@ -497,6 +629,15 @@ def photo_action_keyboard(user_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎨 Змінити стиль", callback_data=f"photo_styles_{user_id}")],
         [InlineKeyboardButton("🔍 Описати фото",  callback_data=f"photo_describe_{user_id}")],
     ])
+
+def persona_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Клавіатура вибору особистості бота."""
+    current = user_personas.get(user_id, "assistant")
+    rows = []
+    for key, p in BOT_PERSONAS.items():
+        label = f"✅ {p['label']}" if key == current else p["label"]
+        rows.append([InlineKeyboardButton(label, callback_data=f"persona_{user_id}_{key}")])
+    return InlineKeyboardMarkup(rows)
 
 def styles_keyboard(user_id: int) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(s["label"], callback_data=f"style_{user_id}_{i}")]
@@ -663,6 +804,22 @@ async def webhook(request: Request):
                 answer_callback(callback_id)
                 return {"ok": True}
 
+            # ── Зміна особистості бота ──────────
+            if cb_data.startswith("persona_"):
+                parts       = cb_data.split("_", 2)
+                user_id     = int(parts[1])
+                persona_key = parts[2]
+                if persona_key in BOT_PERSONAS:
+                    user_personas[user_id] = persona_key
+                    label = BOT_PERSONAS[persona_key]["label"]
+                    edit_message_text(
+                        chat_id, message_id,
+                        f"✅ Режим змінено на <b>{label}</b>\n\nТепер я буду спілкуватися по-новому 😏",
+                        persona_keyboard(user_id)
+                    )
+                answer_callback(callback_id)
+                return {"ok": True}
+
             # ── Головне меню фото ───────────────
             if cb_data.startswith("photo_"):
                 parts   = cb_data.split("_")
@@ -768,6 +925,36 @@ async def webhook(request: Request):
                              reply_markup=photo_action_keyboard(user_id))
             return {"ok": True}
 
+        # ── Голосове повідомлення ───────────────
+        if "voice" in message or "audio" in message:
+            media   = message.get("voice") or message.get("audio")
+            file_id = media["file_id"]
+            send_message(chat_id, "🎙 Розпізнаю голос...")
+            try:
+                audio_bytes, file_path = download_tg_file(file_id)
+                ext        = file_path.split(".")[-1] if "." in file_path else "ogg"
+                transcript = transcribe_voice(audio_bytes, filename=f"voice.{ext}")
+                if not transcript:
+                    send_message(chat_id, "❌ Не вдалося розпізнати. Спробуй ще раз.")
+                    return {"ok": True}
+                send_message(chat_id, f"🎙 <i>Ти сказав:</i> {transcript}")
+                add_to_history(user_id, "user", transcript)
+                matches = search_knowledge(transcript)
+                if matches:
+                    answer = matches[0]["answer"]
+                else:
+                    answer = groq_web_answer(user_id, transcript)
+                add_to_history(user_id, "assistant", answer)
+                send_message(chat_id, answer)
+                # Відповідаємо голосом якщо бажаєте — розкоментуйте:
+                # voice_buf = text_to_speech(answer)
+                # if voice_buf:
+                #     send_voice(chat_id, voice_buf)
+            except Exception as e:
+                logging.error(f"voice: {e}")
+                send_message(chat_id, f"❌ Помилка розпізнавання: {e}")
+            return {"ok": True}
+
         if not text:
             return {"ok": True}
 
@@ -776,14 +963,16 @@ async def webhook(request: Request):
             send_message(chat_id,
                 "👋 Привіт! Я розумний бот.\n\n"
                 "Що я вмію:\n"
-                "• Відповідати з бази знань\n"
-                "• Шукати в інтернеті якщо не знаю\n"
-                "• Генерувати картинки — /img опис\n"
+                "• 💬 Відповідати з бази знань\n"
+                "• 🌐 Шукати в інтернеті\n"
+                "• 🖼 Генерувати картинки — /img опис\n"
                 "• 😂 Меми: стиль + тема + підтема\n"
                 "• 🎨 Переробляти фото у 10 стилях\n"
                 "• 🔍 Описувати що на фото\n"
-                "• Пам'ятаю розмову\n\n"
-                "Надішли фото — і побачиш варіанти!")
+                "• 🎙 Розуміти голосові повідомлення\n"
+                "• 🤖 Змінювати режим спілкування — /mode\n"
+                "• 🔊 Відповідати голосом — /voice\n\n"
+                "Надішли фото або войс — і побачиш магію!")
             return {"ok": True}
 
         if text == "/clear":
@@ -791,7 +980,26 @@ async def webhook(request: Request):
             pending_answers.pop(user_id, None)
             pending_photos.pop(user_id, None)
             meme_style_sel.pop(user_id, None)
-            send_message(chat_id, "🗑 Пам'ять очищена!")
+            user_personas.pop(user_id, None)
+            user_voice_reply.pop(user_id, None)
+            send_message(chat_id, "🗑 Пам'ять очищена, режим скинуто!")
+            return {"ok": True}
+
+        if text == "/mode":
+            current_key   = user_personas.get(user_id, "assistant")
+            current_label = BOT_PERSONAS[current_key]["label"]
+            send_message(
+                chat_id,
+                f"🤖 Поточний режим: <b>{current_label}</b>\n\nОбери нову особистість:",
+                reply_markup=persona_keyboard(user_id)
+            )
+            return {"ok": True}
+
+        if text == "/voice":
+            current = user_voice_reply.get(user_id, False)
+            user_voice_reply[user_id] = not current
+            state = "увімкнено 🔊" if not current else "вимкнено 🔇"
+            send_message(chat_id, f"Голосові відповіді {state}")
             return {"ok": True}
 
         if text.startswith("/img"):
@@ -830,6 +1038,11 @@ async def webhook(request: Request):
             answer = groq_web_answer(user_id, text)
             add_to_history(user_id, "assistant", answer)
             send_message(chat_id, answer)
+            # Голосова відповідь якщо увімкнено
+            if user_voice_reply.get(user_id, False):
+                voice_buf = text_to_speech(answer)
+                if voice_buf:
+                    send_voice(chat_id, voice_buf)
 
     except Exception as e:
         logging.error(f"webhook: {e}")

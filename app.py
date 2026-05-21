@@ -511,6 +511,7 @@ pending_photos:  dict[int, str]          = {}  # user_id -> file_id
 pending_voices:  dict[int, str]          = {}  # user_id -> file_id войсу
 meme_style_sel:  dict[int, int | None]   = {}  # user_id -> style idx або None
 user_voice_reply: dict[int, bool]        = {}  # user_id -> чи відповідати голосом
+pending_textmeme: dict[int, dict]         = {}  # user_id -> {theme, subtopic} поки чекаємо текст
 
 def get_history(user_id: int) -> list:
     return chat_history.setdefault(user_id, [])
@@ -695,6 +696,84 @@ def meme_subtopics_keyboard(user_id: int, theme_idx: int) -> InlineKeyboardMarku
     return InlineKeyboardMarkup(rows)
 
 # ────────────────────────────────────────────
+# Текстовий мем: генерує зображення + текст без фото
+# ────────────────────────────────────────────
+def generate_text_meme(theme_hint: str, user_text: str) -> tuple[str, str, str]:
+    """
+    Повертає (top, bottom, image_prompt).
+    Groq придумує смішний текст і опис картинки для FLUX.
+    """
+    try:
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"Ти генератор мемів. Тема: \"{theme_hint}\". "
+                    f"Текст від юзера: \"{user_text}\"\n\n"
+                    "Придумай смішний мем і опиши картинку для нього. "
+                    "Відповідай СТРОГО у форматі (без зайвого тексту):\n"
+                    "ВЕРХ: короткий смішний текст (макс 6 слів)\n"
+                    "НИЗ: короткий смішний текст (макс 6 слів)\n"
+                    "КАРТИНКА: опис сцени для AI-генератора, англійською, макс 20 слів, "
+                    "смішна ситуація пов'язана з темою"
+                )
+            }],
+            max_tokens=120,
+        )
+        raw = response.choices[0].message.content.strip()
+        logging.info(f"TextMeme raw: {repr(raw)}")
+        top = bottom = img_prompt = ""
+        for line in raw.splitlines():
+            line = line.strip()
+            if line.upper().startswith("ВЕРХ:"):
+                top = line.split(":", 1)[1].strip()
+            elif line.upper().startswith("НИЗ:"):
+                bottom = line.split(":", 1)[1].strip()
+            elif line.upper().startswith("КАРТИНКА:"):
+                img_prompt = line.split(":", 1)[1].strip()
+        if not img_prompt:
+            img_prompt = f"funny cartoon illustration of {theme_hint}, humor, meme style"
+        return top or "Коли...", bottom or "...ось так 😅", img_prompt
+    except Exception as e:
+        logging.error(f"generate_text_meme: {e}")
+        return "Коли просиш бота", "зробити мем 😅", "funny meme cartoon"
+
+async def _generate_text_meme_and_send(chat_id: int, user_id: int, theme_name: str, subtopic: str, user_text: str):
+    theme_hint = f"{theme_name}: {subtopic}"
+    send_message(chat_id, f"⏳ Генерую мем на тему «{subtopic}»...")
+    try:
+        top, bottom, img_prompt = generate_text_meme(theme_hint, user_text)
+        full_prompt = (
+            f"{img_prompt}, funny meme style, vibrant colors, "
+            "cartoon, humorous illustration, high quality"
+        )
+        logging.info(f"TextMeme FLUX prompt: {full_prompt}")
+        img_buf     = generate_image(full_prompt)
+        img_bytes   = img_buf.getvalue()
+        result_buf  = add_meme_text(img_bytes, top, bottom)
+        send_photo(chat_id, result_buf, caption=f"😂 {theme_name} — {subtopic}")
+    except Exception as e:
+        logging.error(f"_generate_text_meme_and_send: {e}")
+        send_message(chat_id, f"❌ Помилка: {e}")
+
+def textmeme_themes_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Вибір теми для мему без фото."""
+    rows = [[InlineKeyboardButton(theme, callback_data=f"tmtheme_{user_id}_{i}")]
+            for i, theme in enumerate(MEME_THEMES.keys())]
+    rows.append([InlineKeyboardButton("🎲 Рандомна тема", callback_data=f"tmtheme_{user_id}_random")])
+    return InlineKeyboardMarkup(rows)
+
+def textmeme_subtopics_keyboard(user_id: int, theme_idx: int) -> InlineKeyboardMarkup:
+    """Вибір підтеми для мему без фото."""
+    theme_name = list(MEME_THEMES.keys())[theme_idx]
+    rows = [[InlineKeyboardButton(sub, callback_data=f"tmsub_{user_id}_{theme_idx}_{j}")]
+            for j, sub in enumerate(MEME_THEMES[theme_name])]
+    rows.append([InlineKeyboardButton("🎲 Рандомна підтема", callback_data=f"tmsub_{user_id}_{theme_idx}_random")])
+    rows.append([InlineKeyboardButton("⬅️ До тем", callback_data=f"tmtheme_back_{user_id}")])
+    return InlineKeyboardMarkup(rows)
+
+# ────────────────────────────────────────────
 # FastAPI
 # ────────────────────────────────────────────
 fastapi_app = FastAPI()
@@ -825,6 +904,54 @@ async def webhook(request: Request):
                 await _generate_meme(chat_id, user_id, file_id, theme_name, subtopic)
                 pending_photos.pop(user_id, None)
                 meme_style_sel.pop(user_id, None)
+                answer_callback(callback_id)
+                return {"ok": True}
+
+            # ── Текстовий мем: вибір теми ────────
+            if cb_data.startswith("tmtheme_back_"):
+                user_id = int(cb_data.split("_")[2])
+                edit_message_text(chat_id, message_id,
+                    "😂 Обери тему для мему:",
+                    textmeme_themes_keyboard(user_id))
+                answer_callback(callback_id)
+                return {"ok": True}
+
+            if cb_data.startswith("tmtheme_"):
+                parts   = cb_data.split("_")
+                user_id = int(parts[1])
+                idx_raw = parts[2]
+                if idx_raw == "random":
+                    theme_name = random.choice(list(MEME_THEMES.keys()))
+                    subtopic   = random.choice(MEME_THEMES[theme_name])
+                    pending_textmeme[user_id] = {"theme": theme_name, "subtopic": subtopic}
+                    edit_message_text(chat_id, message_id,
+                        f"✅ Тема: <b>{theme_name}</b>\n"
+                        f"✅ Підтема: <b>{subtopic}</b>\n\n"
+                        "✍️ Тепер напиши текст для мему (або просто натисни /skip щоб я придумав сам):")
+                else:
+                    theme_idx  = int(idx_raw)
+                    theme_name = list(MEME_THEMES.keys())[theme_idx]
+                    edit_message_text(chat_id, message_id,
+                        f"✅ Тема: <b>{theme_name}</b>\n\n📋 Обери підтему:",
+                        textmeme_subtopics_keyboard(user_id, theme_idx))
+                answer_callback(callback_id)
+                return {"ok": True}
+
+            # ── Текстовий мем: вибір підтеми ────
+            if cb_data.startswith("tmsub_"):
+                parts     = cb_data.split("_")
+                user_id   = int(parts[1])
+                theme_idx = int(parts[2])
+                sub_raw   = parts[3]
+                theme_name = list(MEME_THEMES.keys())[theme_idx]
+                subtopics  = MEME_THEMES[theme_name]
+                subtopic   = random.choice(subtopics) if sub_raw == "random" else subtopics[int(sub_raw)]
+                pending_textmeme[user_id] = {"theme": theme_name, "subtopic": subtopic}
+                edit_message_text(chat_id, message_id,
+                    f"✅ Тема: <b>{theme_name}</b>\n"
+                    f"✅ Підтема: <b>{subtopic}</b>\n\n"
+                    "✍️ Напиши текст для мему — я придумаю смішну картинку і підпис!\n"
+                    "(або /skip — і я сам придумаю все)")
                 answer_callback(callback_id)
                 return {"ok": True}
 
@@ -1019,6 +1146,7 @@ async def webhook(request: Request):
             pending_answers.pop(user_id, None)
             pending_photos.pop(user_id, None)
             pending_voices.pop(user_id, None)
+            pending_textmeme.pop(user_id, None)
             meme_style_sel.pop(user_id, None)
             user_personas.pop(user_id, None)
             user_voice_reply.pop(user_id, None)
@@ -1042,6 +1170,24 @@ async def webhook(request: Request):
             send_message(chat_id, f"Голосові відповіді {state}")
             return {"ok": True}
 
+        if text in ["/meme", "мем", "зроби мем", "мем!"]:
+            send_message(chat_id, "😂 Обери тему для мему:",
+                         reply_markup=textmeme_themes_keyboard(user_id))
+            return {"ok": True}
+
+        if text == "/skip":
+            meme_data = pending_textmeme.get(user_id)
+            if meme_data:
+                await _generate_text_meme_and_send(
+                    chat_id, user_id,
+                    meme_data["theme"], meme_data["subtopic"],
+                    user_text=""
+                )
+                pending_textmeme.pop(user_id, None)
+            else:
+                send_message(chat_id, "Спочатку обери тему — /meme")
+            return {"ok": True}
+
         if text.startswith("/img"):
             prompt = text.replace("/img", "").strip()
             if not prompt:
@@ -1053,6 +1199,17 @@ async def webhook(request: Request):
             except Exception as e:
                 logging.error(f"img: {e}")
                 send_message(chat_id, "Не вдалося згенерувати, спробуй пізніше.")
+            return {"ok": True}
+
+        # ── Перевірка чи юзер вводить текст для мему ──
+        meme_data = pending_textmeme.get(user_id)
+        if meme_data:
+            pending_textmeme.pop(user_id, None)
+            await _generate_text_meme_and_send(
+                chat_id, user_id,
+                meme_data["theme"], meme_data["subtopic"],
+                user_text=text
+            )
             return {"ok": True}
 
         # ── База знань + інтернет ────────────────

@@ -698,6 +698,39 @@ def meme_subtopics_keyboard(user_id: int, theme_idx: int) -> InlineKeyboardMarku
 # ────────────────────────────────────────────
 # Текстовий мем: генерує зображення + текст без фото
 # ────────────────────────────────────────────
+def groq_random_theme() -> tuple[str, str]:
+    """Groq вигадує абсолютно рандомну тему і підтему — не з нашого списку."""
+    try:
+        r = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": (
+                "Вигадай абсолютно рандомну і несподівану тему для українського мему. "
+                "Це має бути щось смішне з реального життя — те чого немає в стандартних списках. "
+                "Наприклад: 'Wi-Fi у маршрутці', 'кіт і новорічна мішура', "
+                "'банківський додаток о 3 ночі', 'сусід з дрилем у неділю вранці'. "
+                "Відповідай СТРОГО у форматі (лише 2 рядки):\n"
+                "ТЕМА: [коротка категорія, 2-4 слова з емодзі]\n"
+                "ПІДТЕМА: [конкретна смішна ситуація, 3-6 слів]"
+            )}],
+            max_tokens=60,
+            temperature=1.0,
+        )
+        raw = r.choices[0].message.content.strip()
+        theme = subtopic = ""
+        for line in raw.splitlines():
+            line = line.strip()
+            if line.upper().startswith("ТЕМА:"):
+                theme = line.split(":", 1)[1].strip()
+            elif line.upper().startswith("ПІДТЕМА:"):
+                subtopic = line.split(":", 1)[1].strip()
+        if theme and subtopic:
+            return theme, subtopic
+    except Exception as e:
+        logging.error(f"groq_random_theme: {e}")
+    # fallback
+    theme_name = random.choice(list(MEME_THEMES.keys()))
+    return theme_name, random.choice(MEME_THEMES[theme_name])
+
 def generate_text_meme(theme_hint: str, user_text: str) -> tuple[str, str, str]:
     """
     Повертає (top, bottom, image_prompt).
@@ -798,7 +831,8 @@ def textmeme_themes_keyboard(user_id: int) -> InlineKeyboardMarkup:
     """Вибір теми для мему без фото."""
     rows = [[InlineKeyboardButton(theme, callback_data=f"tmtheme_{user_id}_{i}")]
             for i, theme in enumerate(MEME_THEMES.keys())]
-    rows.append([InlineKeyboardButton("🎲 Рандомна тема", callback_data=f"tmtheme_{user_id}_random")])
+    rows.append([InlineKeyboardButton("🎲 Рандомна тема",    callback_data=f"tmtheme_{user_id}_random")])
+    rows.append([InlineKeyboardButton("🤯 Сюрприз від AI",   callback_data=f"tmtheme_{user_id}_ai")])
     return InlineKeyboardMarkup(rows)
 
 def textmeme_subtopics_keyboard(user_id: int, theme_idx: int) -> InlineKeyboardMarkup:
@@ -957,9 +991,13 @@ async def webhook(request: Request):
                 parts   = cb_data.split("_")
                 user_id = int(parts[1])
                 idx_raw = parts[2]
-                if idx_raw == "random":
-                    theme_name = random.choice(list(MEME_THEMES.keys()))
-                    subtopic   = random.choice(MEME_THEMES[theme_name])
+                if idx_raw in ("random", "ai"):
+                    if idx_raw == "ai":
+                        edit_message_text(chat_id, message_id, "🤯 AI вигадує тему...")
+                        theme_name, subtopic = groq_random_theme()
+                    else:
+                        theme_name = random.choice(list(MEME_THEMES.keys()))
+                        subtopic   = random.choice(MEME_THEMES[theme_name])
                     pending_textmeme[user_id] = {"theme": theme_name, "subtopic": subtopic}
                     edit_message_text(chat_id, message_id,
                         f"✅ Тема: <b>{theme_name}</b>\n"

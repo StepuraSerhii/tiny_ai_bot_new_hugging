@@ -701,25 +701,37 @@ def meme_subtopics_keyboard(user_id: int, theme_idx: int) -> InlineKeyboardMarku
 def generate_text_meme(theme_hint: str, user_text: str) -> tuple[str, str, str]:
     """
     Повертає (top, bottom, image_prompt).
-    Groq придумує смішний текст і опис картинки для FLUX.
+    Groq придумує смішний текст І детальний image prompt для FLUX.
     """
+    user_part = f'Додатково юзер написав: "{user_text}". Врахуй це у тексті мему.' if user_text.strip() else ""
+    system = (
+        "Ти експерт з мемів та промптів для Stable Diffusion / FLUX. "
+        "Твоє завдання — придумати смішний мем І написати детальний image prompt "
+        "який точно відображає ситуацію з мему. "
+        "Image prompt має бути: конкретна смішна сцена, персонажі, їх емоції та дії, "
+        "стиль cartoon/illustration. НЕ загальний — а саме та ситуація яка в мемі. "
+        "Наприклад для теми 'принтер не працює': "
+        "'frustrated office worker staring at broken printer with smoke coming out, "
+        "cartoon style, exaggerated angry expression, office background' — "
+        "а НЕ просто 'funny office cartoon'."
+    )
+    prompt = (
+        f"Тема мему: \"{theme_hint}\". {user_part}\n\n"
+        "Відповідай СТРОГО у форматі (лише ці 3 рядки, нічого зайвого):\n"
+        "ВЕРХ: [смішний текст українською, макс 6 слів]\n"
+        "НИЗ: [смішний текст українською, макс 6 слів]\n"
+        "КАРТИНКА: [детальний англійський prompt для FLUX — конкретна сцена з мему, "
+        "персонажі + їх емоції + дія + фон, cartoon illustration style, макс 25 слів]"
+    )
     try:
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Ти генератор мемів. Тема: \"{theme_hint}\". "
-                    f"Текст від юзера: \"{user_text}\"\n\n"
-                    "Придумай смішний мем і опиши картинку для нього. "
-                    "Відповідай СТРОГО у форматі (без зайвого тексту):\n"
-                    "ВЕРХ: короткий смішний текст (макс 6 слів)\n"
-                    "НИЗ: короткий смішний текст (макс 6 слів)\n"
-                    "КАРТИНКА: опис сцени для AI-генератора, англійською, макс 20 слів, "
-                    "смішна ситуація пов'язана з темою"
-                )
-            }],
-            max_tokens=120,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user",   "content": prompt},
+            ],
+            max_tokens=150,
+            temperature=0.9,
         )
         raw = response.choices[0].message.content.strip()
         logging.info(f"TextMeme raw: {repr(raw)}")
@@ -733,11 +745,29 @@ def generate_text_meme(theme_hint: str, user_text: str) -> tuple[str, str, str]:
             elif line.upper().startswith("КАРТИНКА:"):
                 img_prompt = line.split(":", 1)[1].strip()
         if not img_prompt:
-            img_prompt = f"funny cartoon illustration of {theme_hint}, humor, meme style"
+            # Fallback — просимо Groq тільки prompt
+            img_prompt = _fallback_image_prompt(theme_hint)
         return top or "Коли...", bottom or "...ось так 😅", img_prompt
     except Exception as e:
         logging.error(f"generate_text_meme: {e}")
-        return "Коли просиш бота", "зробити мем 😅", "funny meme cartoon"
+        return "Коли просиш бота", "зробити мем 😅", _fallback_image_prompt(theme_hint)
+
+def _fallback_image_prompt(theme_hint: str) -> str:
+    """Запасний варіант — окремий запит тільки для image prompt."""
+    try:
+        r = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": (
+                f"Write a FLUX image generation prompt for a meme about: \"{theme_hint}\". "
+                "Be specific: describe the exact funny scene, characters, emotions, actions, background. "
+                "Cartoon illustration style. Max 25 words. Only the prompt, nothing else."
+            )}],
+            max_tokens=60,
+            temperature=0.8,
+        )
+        return r.choices[0].message.content.strip()
+    except Exception:
+        return f"funny cartoon illustration of {theme_hint}, humorous scene, expressive characters"
 
 async def _generate_text_meme_and_send(chat_id: int, user_id: int, theme_name: str, subtopic: str, user_text: str):
     theme_hint = f"{theme_name}: {subtopic}"
@@ -745,13 +775,14 @@ async def _generate_text_meme_and_send(chat_id: int, user_id: int, theme_name: s
     try:
         top, bottom, img_prompt = generate_text_meme(theme_hint, user_text)
         full_prompt = (
-            f"{img_prompt}, funny meme style, vibrant colors, "
-            "cartoon, humorous illustration, high quality"
+            f"{img_prompt}, "
+            "high quality, vibrant colors, clean cartoon illustration, "
+            "funny expressive characters, detailed background, no text"
         )
         logging.info(f"TextMeme FLUX prompt: {full_prompt}")
-        img_buf     = generate_image(full_prompt)
-        img_bytes   = img_buf.getvalue()
-        result_buf  = add_meme_text(img_bytes, top, bottom)
+        img_buf    = generate_image(full_prompt)
+        img_bytes  = img_buf.getvalue()
+        result_buf = add_meme_text(img_bytes, top, bottom)
         send_photo(chat_id, result_buf, caption=f"😂 {theme_name} — {subtopic}")
     except Exception as e:
         logging.error(f"_generate_text_meme_and_send: {e}")

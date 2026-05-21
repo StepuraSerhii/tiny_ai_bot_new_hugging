@@ -1193,6 +1193,24 @@ async def webhook(request: Request):
                 answer_callback(callback_id)
                 return {"ok": True}
 
+            # ── Перемикач голосу ────────────────
+            if cb_data.startswith("voicetoggle_"):
+                user_id = int(cb_data.split("_")[1])
+                current = user_voice_reply.get(user_id, False)
+                user_voice_reply[user_id] = not current
+                new_state = not current
+                kb = InlineKeyboardMarkup([[
+                    InlineKeyboardButton(
+                        "🔊 Увімкнути голос" if not new_state else "🔇 Вимкнути голос",
+                        callback_data=f"voicetoggle_{user_id}"
+                    )
+                ]])
+                state_text = "🔊 <b>Увімкнено</b> — відповідаю голосом" if new_state else "🔇 <b>Вимкнено</b> — відповідаю текстом"
+                edit_message_text(chat_id, message_id,
+                    f"Режим голосових відповідей\n{state_text}", kb)
+                answer_callback(callback_id)
+                return {"ok": True}
+
             # ── База знань ──────────────────────
             if cb_data.startswith("notfound_"):
                 user_id = int(cb_data.split("_")[1])
@@ -1200,7 +1218,15 @@ async def webhook(request: Request):
                 query   = last[-1]["content"] if last else ""
                 answer  = groq_web_answer(user_id, query)
                 add_to_history(user_id, "assistant", answer)
-                send_message(chat_id, answer)
+                if user_voice_reply.get(user_id, False):
+                    send_message(chat_id, "🎙 Генерую голосову відповідь...")
+                    voice_buf = text_to_speech(answer)
+                    if voice_buf:
+                        send_voice(chat_id, voice_buf)
+                    else:
+                        send_message(chat_id, answer)
+                else:
+                    send_message(chat_id, answer)
                 answer_callback(callback_id)
                 return {"ok": True}
 
@@ -1310,9 +1336,17 @@ async def webhook(request: Request):
 
         if text == "/voice":
             current = user_voice_reply.get(user_id, False)
-            user_voice_reply[user_id] = not current
-            state = "увімкнено 🔊" if not current else "вимкнено 🔇"
-            send_message(chat_id, f"Голосові відповіді {state}")
+            kb = InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    "🔊 Увімкнути голос" if not current else "🔇 Вимкнути голос",
+                    callback_data=f"voicetoggle_{user_id}"
+                )
+            ]])
+            state = "🔊 Зараз: <b>увімкнено</b>" if current else "🔇 Зараз: <b>вимкнено</b>"
+            send_message(chat_id,
+                f"Режим голосових відповідей\n{state}\n\n"
+                "Коли увімкнено — бот відповідає тільки голосом (без тексту).",
+                reply_markup=kb)
             return {"ok": True}
 
         if text in ["/meme", "мем", "зроби мем", "мем!"]:
@@ -1366,12 +1400,17 @@ async def webhook(request: Request):
         else:
             answer = groq_web_answer(user_id, text)
             add_to_history(user_id, "assistant", answer)
-            send_message(chat_id, answer)
-            # Голосова відповідь якщо увімкнено
             if user_voice_reply.get(user_id, False):
+                # Голосовий режим — спочатку генеруємо, якщо вдалося — тільки войс
+                send_message(chat_id, "🎙 Генерую голосову відповідь...")
                 voice_buf = text_to_speech(answer)
                 if voice_buf:
                     send_voice(chat_id, voice_buf)
+                else:
+                    # gTTS не спрацював — fallback на текст
+                    send_message(chat_id, answer)
+            else:
+                send_message(chat_id, answer)
 
     except Exception as e:
         logging.error(f"webhook: {e}")

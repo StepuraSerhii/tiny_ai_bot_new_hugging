@@ -321,61 +321,111 @@ def generate_meme_text(image_bytes: bytes, theme_hint: str = "") -> tuple[str, s
 # ────────────────────────────────────────────
 # Мем: накладання тексту через Pillow
 # ────────────────────────────────────────────
+def _load_font(font_size: int):
+    """Завантажує кириличний шрифт потрібного розміру."""
+    if CYRILLIC_FONT:
+        try:
+            return ImageFont.truetype(CYRILLIC_FONT, font_size)
+        except Exception:
+            pass
+    try:
+        result = subprocess.run(
+            ["fc-list", ":lang=uk:style=Bold", "--format=%{file}\n"],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.endswith(".ttf") or line.endswith(".otf"):
+                try:
+                    return ImageFont.truetype(line, font_size)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return ImageFont.load_default()
+
+def _fit_text(draw: ImageDraw.ImageDraw, text: str, max_width: int,
+              font_path: str | None, start_size: int, min_size: int = 20) -> tuple:
+    """
+    Підбирає розмір шрифту і переносить рядки так щоб текст
+    гарантовано вліз у max_width пікселів.
+    Повертає (font, lines, line_height, outline).
+    """
+    text = text.upper()
+    size = start_size
+    while size >= min_size:
+        font = _load_font(size)
+        # Пробуємо перенести по словах
+        words = text.split()
+        lines = []
+        current = ""
+        for word in words:
+            test = (current + " " + word).strip()
+            try:
+                bbox = draw.textbbox((0, 0), test, font=font)
+                tw   = bbox[2] - bbox[0]
+            except Exception:
+                tw = size * len(test) // 2
+            if tw <= max_width:
+                current = test
+            else:
+                if current:
+                    lines.append(current)
+                current = word
+        if current:
+            lines.append(current)
+        # Перевіряємо що жоден рядок не ширший за max_width
+        fits = True
+        for line in lines:
+            try:
+                bbox = draw.textbbox((0, 0), line, font=font)
+                lw   = bbox[2] - bbox[0]
+            except Exception:
+                lw = size * len(line) // 2
+            if lw > max_width:
+                fits = False
+                break
+        if fits:
+            line_height = int(size * 1.25)
+            outline     = max(2, size // 12)
+            return font, lines, line_height, outline
+        size -= 2
+    # Якщо нічого не підійшло — беремо мінімальний
+    font        = _load_font(min_size)
+    line_height = int(min_size * 1.25)
+    outline     = max(2, min_size // 12)
+    return font, [text], line_height, outline
+
 def add_meme_text(image_bytes: bytes, top_text: str, bottom_text: str) -> io.BytesIO:
     img  = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     draw = ImageDraw.Draw(img)
     w, h = img.size
-    font_size = max(36, int(h * 0.08))
-    font = None
-    if CYRILLIC_FONT:
-        try:
-            font = ImageFont.truetype(CYRILLIC_FONT, font_size)
-        except Exception as e:
-            logging.error(f"Шрифт: {e}")
-    if font is None:
-        try:
-            result = subprocess.run(
-                ["fc-list", ":lang=uk:style=Bold", "--format=%{file}\n"],
-                capture_output=True, text=True, timeout=5
-            )
-            for line in result.stdout.splitlines():
-                line = line.strip()
-                if line.endswith(".ttf") or line.endswith(".otf"):
-                    try:
-                        font = ImageFont.truetype(line, font_size)
-                        break
-                    except Exception:
-                        continue
-        except Exception:
-            pass
-    if font is None:
-        font = ImageFont.load_default()
 
-    def draw_outlined_text(text: str, y_start: int):
-        text = text.upper()
-        max_chars   = max(8, int(w / (font_size * 0.58)))
-        lines       = textwrap.wrap(text, width=max_chars) or [text]
-        line_height = int(font_size * 1.2)
-        outline     = max(3, font_size // 10)
+    start_size = max(28, int(h * 0.08))
+    max_w      = int(w * 0.92)   # 4% відступ з кожного боку
+    padding    = int(h * 0.02)
+
+    def draw_block(text: str, anchor: str):
+        """anchor: 'top' або 'bottom'"""
+        font, lines, lh, outline = _fit_text(draw, text, max_w, CYRILLIC_FONT, start_size)
+        block_h = len(lines) * lh
+        y0 = padding if anchor == "top" else h - padding - block_h
         for i, line in enumerate(lines):
             try:
                 bbox   = draw.textbbox((0, 0), line, font=font)
                 text_w = bbox[2] - bbox[0]
             except Exception:
-                text_w = font_size * len(line) // 2
+                text_w = len(line) * (start_size // 2)
             x = max(4, (w - text_w) // 2)
-            y = y_start + i * line_height
+            y = y0 + i * lh
             for dx in range(-outline, outline + 1):
                 for dy in range(-outline, outline + 1):
-                    if dx != 0 or dy != 0:
+                    if dx or dy:
                         draw.text((x + dx, y + dy), line, font=font, fill=(0, 0, 0))
             draw.text((x, y), line, font=font, fill=(255, 255, 255))
 
-    draw_outlined_text(top_text, int(h * 0.02))
-    max_chars   = max(8, int(w / (font_size * 0.58)))
-    n_lines     = len(textwrap.wrap(bottom_text.upper(), width=max_chars) or [bottom_text])
-    line_height = int(font_size * 1.2)
-    draw_outlined_text(bottom_text, int(h * 0.97) - n_lines * line_height)
+    draw_block(top_text,    "top")
+    draw_block(bottom_text, "bottom")
 
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=92)

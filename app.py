@@ -30,8 +30,6 @@ groq_client = Groq(api_key=GROQ_API_KEY)
 FONT_PATH = "/tmp/NotoSans-Bold.ttf"
 
 def ensure_cyrillic_font():
-    """Завантажує Noto Sans Bold з Google Fonts якщо нема локально."""
-    # Спочатку перевіряємо локальні шрифти з підтримкою кирилиці
     local_paths = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
@@ -43,26 +41,24 @@ def ensure_cyrillic_font():
         if os.path.exists(path):
             try:
                 test = ImageFont.truetype(path, 20)
-                # Перевіряємо чи підтримує кирилицю
-                img = Image.new("RGB", (100, 30))
-                draw = ImageDraw.Draw(img)
-                draw.text((0, 0), "Привіт", font=test)
-                logging.info(f"Використовую локальний шрифт: {path}")
+                img  = Image.new("RGB", (100, 30))
+                ImageDraw.Draw(img).text((0, 0), "Привіт", font=test)
+                logging.info(f"Локальний шрифт: {path}")
                 return path
             except Exception:
                 continue
-
-    # Якщо локальних нема — завантажуємо з Google Fonts
     if not os.path.exists(FONT_PATH):
         try:
-            logging.info("Завантажую NotoSans-Bold з Google Fonts...")
-            url = "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSans/NotoSans-Bold.ttf"
-            r = requests.get(url, timeout=30)
+            logging.info("Завантажую NotoSans-Bold...")
+            r = requests.get(
+                "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSans/NotoSans-Bold.ttf",
+                timeout=30
+            )
             with open(FONT_PATH, "wb") as f:
                 f.write(r.content)
-            logging.info("Шрифт завантажено успішно")
+            logging.info("Шрифт завантажено")
         except Exception as e:
-            logging.error(f"Не вдалося завантажити шрифт: {e}")
+            logging.error(f"Шрифт не завантажено: {e}")
             return None
     return FONT_PATH
 
@@ -132,29 +128,33 @@ def send_message(chat_id: int, text: str, reply_markup=None) -> bool:
         r = requests.post(url, json=payload, timeout=10)
         if r.status_code == 200:
             return True
-        logging.error(f"send_message статус: {r.status_code} {r.text}")
+        logging.error(f"send_message: {r.status_code} {r.text}")
         return False
     except Exception as e:
-        logging.error(f"send_message помилка: {e}")
+        logging.error(f"send_message: {e}")
         return False
 
 def send_photo(chat_id: int, photo: io.BytesIO, caption: str = ""):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
     try:
-        requests.post(url, data={"chat_id": chat_id, "caption": caption},
-                      files={"photo": photo}, timeout=60)
+        requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
+            data={"chat_id": chat_id, "caption": caption},
+            files={"photo": photo}, timeout=60
+        )
     except Exception as e:
-        logging.error(f"send_photo помилка: {e}")
+        logging.error(f"send_photo: {e}")
 
 def answer_callback(callback_id: str):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery"
     try:
-        requests.post(url, json={"callback_query_id": callback_id}, timeout=10)
+        requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+            json={"callback_query_id": callback_id}, timeout=10
+        )
     except Exception as e:
-        logging.error(f"answer_callback помилка: {e}")
+        logging.error(f"answer_callback: {e}")
 
 def edit_message_text(chat_id: int, message_id: int, text: str, reply_markup=None):
-    payload = {"chat_id": chat_id, "message_id": message_id, "text": text}
+    payload = {"chat_id": chat_id, "message_id": message_id, "text": text, "parse_mode": "HTML"}
     if reply_markup:
         payload["reply_markup"] = reply_markup.to_dict()
     try:
@@ -163,7 +163,7 @@ def edit_message_text(chat_id: int, message_id: int, text: str, reply_markup=Non
             json=payload, timeout=10
         )
     except Exception as e:
-        logging.error(f"edit_message_text помилка: {e}")
+        logging.error(f"edit_message_text: {e}")
 
 def edit_message_keyboard(chat_id: int, message_id: int, reply_markup):
     try:
@@ -173,7 +173,7 @@ def edit_message_keyboard(chat_id: int, message_id: int, reply_markup):
                   "reply_markup": reply_markup.to_dict()}, timeout=10
         )
     except Exception as e:
-        logging.error(f"edit_message_keyboard помилка: {e}")
+        logging.error(f"edit_message_keyboard: {e}")
 
 # ────────────────────────────────────────────
 # Робота з фото Telegram
@@ -198,10 +198,7 @@ def photo_to_base64(image_bytes: bytes) -> str:
 # ────────────────────────────────────────────
 def generate_meme_text(image_bytes: bytes, theme_hint: str = "") -> tuple[str, str]:
     b64 = photo_to_base64(image_bytes)
-    theme_instruction = ""
-    if theme_hint:
-        theme_instruction = f'\nТема мему: "{theme_hint}". Обов\'язково прив\'яжи текст до цієї теми!'
-
+    theme_instruction = f'\nТема мему: "{theme_hint}". Прив\'яжи текст до цієї теми!' if theme_hint else ""
     try:
         response = groq_client.chat.completions.create(
             model="meta-llama/llama-4-scout-17b-16e-instruct",
@@ -210,60 +207,48 @@ def generate_meme_text(image_bytes: bytes, theme_hint: str = "") -> tuple[str, s
                 "content": [
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
                     {"type": "text", "text": (
-                        f"Ти генератор мемів. Подивись на фото і придумай смішний мем-текст українською.{theme_instruction}\n"
-                        "Відповідай СТРОГО у такому форматі, без зайвого тексту:\n"
-                        "ВЕРХ: тут короткий текст\n"
-                        "НИЗ: тут короткий текст\n"
-                        "Текст має бути коротким — максимум 6 слів у кожному рядку!"
+                        f"Ти генератор мемів. Придумай смішний мем-текст українською.{theme_instruction}\n"
+                        "Відповідай СТРОГО у форматі без зайвого тексту:\n"
+                        "ВЕРХ: короткий текст (макс 6 слів)\n"
+                        "НИЗ: короткий текст (макс 6 слів)"
                     )}
                 ]
             }],
             max_tokens=80
         )
         raw = response.choices[0].message.content.strip()
-        logging.info(f"Groq meme raw: {repr(raw)}")
-
+        logging.info(f"Meme raw: {repr(raw)}")
         top, bottom = "", ""
         for line in raw.splitlines():
             line = line.strip()
-            upper = line.upper()
-            if upper.startswith("ВЕРХ:"):
+            if line.upper().startswith("ВЕРХ:"):
                 top = line.split(":", 1)[1].strip()
-            elif upper.startswith("НИЗ:"):
+            elif line.upper().startswith("НИЗ:"):
                 bottom = line.split(":", 1)[1].strip()
-
         if not top and not bottom:
             lines = [l.strip() for l in raw.splitlines() if l.strip()]
-            top    = lines[0] if len(lines) > 0 else "Коли просиш зробити мем"
-            bottom = lines[1] if len(lines) > 1 else "А він просто повертає фото 😅"
-
-        logging.info(f"Мем: ВЕРХ='{top}' | НИЗ='{bottom}'")
+            top    = lines[0] if lines else "Коли просиш зробити мем"
+            bottom = lines[1] if len(lines) > 1 else "А він повертає фото 😅"
         return top or "Коли...", bottom or "...ось так 😅"
-
     except Exception as e:
-        logging.error(f"generate_meme_text помилка: {e}")
+        logging.error(f"generate_meme_text: {e}")
         return "Коли просиш бота", "зробити мем 😅"
 
 # ────────────────────────────────────────────
 # Мем: накладання тексту через Pillow
 # ────────────────────────────────────────────
 def add_meme_text(image_bytes: bytes, top_text: str, bottom_text: str) -> io.BytesIO:
-    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    img  = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     draw = ImageDraw.Draw(img)
     w, h = img.size
-
     font_size = max(36, int(h * 0.08))
     font = None
-
     if CYRILLIC_FONT:
         try:
             font = ImageFont.truetype(CYRILLIC_FONT, font_size)
-            logging.info(f"Мем шрифт: {CYRILLIC_FONT}, розмір {font_size}")
         except Exception as e:
-            logging.error(f"Не вдалося завантажити шрифт: {e}")
-
+            logging.error(f"Шрифт: {e}")
     if font is None:
-        # Fallback через fc-list
         try:
             result = subprocess.run(
                 ["fc-list", ":lang=uk:style=Bold", "--format=%{file}\n"],
@@ -279,45 +264,34 @@ def add_meme_text(image_bytes: bytes, top_text: str, bottom_text: str) -> io.Byt
                         continue
         except Exception:
             pass
-
     if font is None:
-        logging.warning("Шрифт не знайдено!")
         font = ImageFont.load_default()
 
     def draw_outlined_text(text: str, y_start: int):
         text = text.upper()
-        max_chars = max(8, int(w / (font_size * 0.58)))
-        lines = textwrap.wrap(text, width=max_chars) or [text]
+        max_chars   = max(8, int(w / (font_size * 0.58)))
+        lines       = textwrap.wrap(text, width=max_chars) or [text]
         line_height = int(font_size * 1.2)
-        outline = max(3, font_size // 10)
-
+        outline     = max(3, font_size // 10)
         for i, line in enumerate(lines):
             try:
-                bbox = draw.textbbox((0, 0), line, font=font)
+                bbox   = draw.textbbox((0, 0), line, font=font)
                 text_w = bbox[2] - bbox[0]
             except Exception:
                 text_w = font_size * len(line) // 2
-
             x = max(4, (w - text_w) // 2)
             y = y_start + i * line_height
-
-            # Чорна обводка (товста)
             for dx in range(-outline, outline + 1):
                 for dy in range(-outline, outline + 1):
                     if dx != 0 or dy != 0:
                         draw.text((x + dx, y + dy), line, font=font, fill=(0, 0, 0))
-            # Білий текст
             draw.text((x, y), line, font=font, fill=(255, 255, 255))
 
-    # Верхній текст
     draw_outlined_text(top_text, int(h * 0.02))
-
-    # Нижній текст — рахуємо висоту блоку щоб не вилізти
-    max_chars = max(8, int(w / (font_size * 0.58)))
-    bottom_lines_count = len(textwrap.wrap(bottom_text.upper(), width=max_chars) or [bottom_text])
+    max_chars   = max(8, int(w / (font_size * 0.58)))
+    n_lines     = len(textwrap.wrap(bottom_text.upper(), width=max_chars) or [bottom_text])
     line_height = int(font_size * 1.2)
-    bottom_y = int(h * 0.97) - bottom_lines_count * line_height
-    draw_outlined_text(bottom_text, bottom_y)
+    draw_outlined_text(bottom_text, int(h * 0.97) - n_lines * line_height)
 
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=92)
@@ -327,39 +301,34 @@ def add_meme_text(image_bytes: bytes, top_text: str, bottom_text: str) -> io.Byt
 # ────────────────────────────────────────────
 # Переробка стилю: Groq описує → FLUX генерує
 # ────────────────────────────────────────────
-def restyle_image(image_bytes: bytes, style_prompt: str) -> io.BytesIO | None:
+def restyle_image(image_bytes: bytes, style_prompt: str) -> bytes | None:
+    """Повертає bytes (не BytesIO) щоб зручно передавати далі."""
     try:
         b64 = photo_to_base64(image_bytes)
-        vision_resp = groq_client.chat.completions.create(
+        vision = groq_client.chat.completions.create(
             model="meta-llama/llama-4-scout-17b-16e-instruct",
             messages=[{
                 "role": "user",
                 "content": [
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
                     {"type": "text", "text": (
-                        "Describe this image in detail for an AI image generator. "
-                        "Focus on: main subject, composition, lighting, colors, background. "
-                        "Be specific and descriptive. Answer in English only. Max 60 words."
+                        "Describe this image for an AI image generator. "
+                        "Main subject, composition, lighting, colors, background. "
+                        "English only. Max 60 words."
                     )}
                 ]
             }],
             max_tokens=100
         )
-        description = vision_resp.choices[0].message.content.strip()
-        logging.info(f"Restyle опис: {description}")
-
-        full_prompt = f"{description}, {style_prompt}, highly detailed, high quality"
-        image = hf_client.text_to_image(
-            full_prompt,
-            model="black-forest-labs/FLUX.1-schnell"
-        )
-        buf = io.BytesIO()
+        description  = vision.choices[0].message.content.strip()
+        full_prompt  = f"{description}, {style_prompt}, highly detailed, high quality"
+        logging.info(f"Restyle prompt: {full_prompt[:80]}")
+        image = hf_client.text_to_image(full_prompt, model="black-forest-labs/FLUX.1-schnell")
+        buf   = io.BytesIO()
         image.save(buf, format="PNG")
-        buf.seek(0)
-        return buf
-
+        return buf.getvalue()
     except Exception as e:
-        logging.error(f"restyle_image помилка: {e}")
+        logging.error(f"restyle_image: {e}")
         return None
 
 # ────────────────────────────────────────────
@@ -374,14 +343,14 @@ def describe_image(image_bytes: bytes) -> str:
                 "role": "user",
                 "content": [
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-                    {"type": "text", "text": "Опиши детально що зображено на цьому фото. Відповідай українською мовою."}
+                    {"type": "text", "text": "Опиши детально що зображено на цьому фото. Відповідай українською."}
                 ]
             }],
             max_tokens=300
         )
         return response.choices[0].message.content
     except Exception as e:
-        logging.error(f"describe_image помилка: {e}")
+        logging.error(f"describe_image: {e}")
         return "Не вдалося розпізнати фото."
 
 # ────────────────────────────────────────────
@@ -389,14 +358,13 @@ def describe_image(image_bytes: bytes) -> str:
 # ────────────────────────────────────────────
 def load_knowledge() -> list:
     try:
-        api = HfApi(token=HF_TOKEN)
+        api   = HfApi(token=HF_TOKEN)
         files = api.list_repo_files(repo_id="Tiny89/tiny-bot-knowledge", repo_type="dataset")
         all_entries = []
         for file in files:
             if file.endswith(".md"):
-                url = f"https://huggingface.co/datasets/Tiny89/tiny-bot-knowledge/resolve/main/{file}"
-                headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-                response = requests.get(url, headers=headers)
+                url      = f"https://huggingface.co/datasets/Tiny89/tiny-bot-knowledge/resolve/main/{file}"
+                response = requests.get(url, headers={"Authorization": f"Bearer {HF_TOKEN}"})
                 if response.status_code == 200:
                     entries = parse_knowledge(response.text)
                     all_entries.extend(entries)
@@ -404,11 +372,11 @@ def load_knowledge() -> list:
         logging.info(f"База знань: {len(all_entries)} записів")
         return all_entries
     except Exception as e:
-        logging.error(f"Помилка завантаження бази: {e}")
+        logging.error(f"load_knowledge: {e}")
         return []
 
 def parse_knowledge(text: str) -> list:
-    entries = []
+    entries  = []
     sections = re.split(r"\n?###KEYWORDS###\n?", text)
     for i, section in enumerate(sections):
         if "###ANSWER###" not in section:
@@ -417,43 +385,31 @@ def parse_knowledge(text: str) -> list:
         if len(parts) < 2:
             continue
         keywords_raw = parts[0].strip()
-        answer_raw   = parts[1].strip()
-        answer = re.split(r"\n---\n", answer_raw)[0].strip()
-        prev = sections[i - 1] if i > 0 else ""
+        answer       = re.split(r"\n---\n", parts[1].strip())[0].strip()
+        prev         = sections[i - 1] if i > 0 else ""
         after_answer = prev.split("###ANSWER###")[-1] if "###ANSWER###" in prev else prev
-        h_match = re.search(r"^#\s+(.+)$", after_answer, re.MULTILINE)
+        h_match      = re.search(r"^#\s+(.+)$", after_answer, re.MULTILINE)
         if h_match:
             title = h_match.group(1).strip()
         else:
             b_match = re.search(r"<b>(.*?)</b>", answer)
-            if b_match:
-                title = b_match.group(1).strip()
-            else:
-                for line in keywords_raw.split("\n"):
-                    line = line.strip()
-                    if line:
-                        title = line.split(",")[0].strip()
-                        break
-                else:
-                    title = "Без назви"
+            title = b_match.group(1).strip() if b_match else (
+                next((l.strip().split(",")[0].strip() for l in keywords_raw.split("\n") if l.strip()), "Без назви")
+            )
         kw_list = [k.strip().lower() for k in keywords_raw.split(",") if k.strip()]
         if kw_list and answer:
             entries.append({"title": title, "keywords": kw_list, "answer": answer})
     return entries
 
 def search_knowledge(query: str) -> list:
-    q = query.lower().strip()
+    q       = query.lower().strip()
     matches = []
-    seen = set()
+    seen    = set()
     for entry in KNOWLEDGE:
         for kw in entry["keywords"]:
             kw = kw.strip()
-            if q == kw or q.startswith(kw + " ") or q.endswith(" " + kw) or (" " + kw + " ") in q:
-                if entry["title"] not in seen:
-                    seen.add(entry["title"])
-                    matches.append(entry)
-                break
-            if kw.startswith(q + " ") or kw.endswith(" " + q) or (" " + q + " ") in kw:
+            if q == kw or q.startswith(kw+" ") or q.endswith(" "+kw) or (" "+kw+" ") in q \
+               or kw.startswith(q+" ") or kw.endswith(" "+q) or (" "+q+" ") in kw:
                 if entry["title"] not in seen:
                     seen.add(entry["title"])
                     matches.append(entry)
@@ -465,9 +421,10 @@ KNOWLEDGE = load_knowledge()
 # ────────────────────────────────────────────
 # Пам'ять
 # ────────────────────────────────────────────
-chat_history:    dict[int, list] = {}
-pending_answers: dict[int, list] = {}
-pending_photos:  dict[int, str]  = {}  # user_id -> file_id
+chat_history:    dict[int, list]         = {}
+pending_answers: dict[int, list]         = {}
+pending_photos:  dict[int, str]          = {}  # user_id -> file_id
+meme_style_sel:  dict[int, int | None]   = {}  # user_id -> style idx або None
 
 def get_history(user_id: int) -> list:
     return chat_history.setdefault(user_id, [])
@@ -492,7 +449,7 @@ def search_web(query: str) -> str:
             text += f"• {r['title']}\n{r['body']}\n\n"
         return text
     except Exception as e:
-        logging.error(f"Пошук помилка: {e}")
+        logging.error(f"search_web: {e}")
         return ""
 
 def ask_llm(system_prompt: str, user_id: int, user_text: str) -> str:
@@ -500,9 +457,7 @@ def ask_llm(system_prompt: str, user_id: int, user_text: str) -> str:
     messages += get_history(user_id)
     messages.append({"role": "user", "content": user_text})
     response = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=messages,
-        max_tokens=500
+        model="llama-3.3-70b-versatile", messages=messages, max_tokens=500
     )
     return response.choices[0].message.content
 
@@ -513,18 +468,14 @@ def groq_web_answer(user_id: int, text: str) -> str:
     try:
         answer = ask_llm(
             "Ти корисний асистент служби підтримки. Відповідай ВИКЛЮЧНО українською мовою.\n\n"
-            "Правила відповіді:\n"
-            "1. Дай коротку чітку відповідь на запит користувача\n"
-            "2. Використовуй тільки релевантну інформацію з джерел\n"
-            "3. Структуруй відповідь: спочатку суть, потім деталі\n"
-            "4. Максимум 5 речень\n"
-            "5. Не копіюй зайвий текст з джерел\n\n"
+            "1. Коротка чітка відповідь\n2. Тільки релевантна інформація\n"
+            "3. Спочатку суть, потім деталі\n4. Максимум 5 речень\n\n"
             f"Джерела:\n{web}",
             user_id, text
         )
         return "🌐 (з інтернету)\n\n" + answer
     except Exception as e:
-        logging.error(f"Groq помилка: {e}")
+        logging.error(f"groq_web_answer: {e}")
         return web
 
 # ────────────────────────────────────────────
@@ -532,7 +483,7 @@ def groq_web_answer(user_id: int, text: str) -> str:
 # ────────────────────────────────────────────
 def generate_image(prompt: str) -> io.BytesIO:
     image = hf_client.text_to_image(prompt, model="black-forest-labs/FLUX.1-schnell")
-    buf = io.BytesIO()
+    buf   = io.BytesIO()
     image.save(buf, format="PNG")
     buf.seek(0)
     return buf
@@ -553,24 +504,29 @@ def styles_keyboard(user_id: int) -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton("⬅️ Назад", callback_data=f"photo_back_{user_id}")])
     return InlineKeyboardMarkup(rows)
 
+def meme_style_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Крок 1 мему — вибір стилю фото."""
+    rows = [[InlineKeyboardButton(s["label"], callback_data=f"memestyle_{user_id}_{i}")]
+            for i, s in enumerate(STYLES)]
+    rows.append([InlineKeyboardButton("⏭ Без стилю — лише текст", callback_data=f"memestyle_{user_id}_none")])
+    rows.append([InlineKeyboardButton("⬅️ Назад",                  callback_data=f"photo_back_{user_id}")])
+    return InlineKeyboardMarkup(rows)
+
 def meme_themes_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    """Меню вибору теми мему."""
-    rows = []
-    for i, theme in enumerate(MEME_THEMES.keys()):
-        rows.append([InlineKeyboardButton(theme, callback_data=f"mtheme_{user_id}_{i}")])
+    """Крок 2 мему — вибір теми."""
+    rows = [[InlineKeyboardButton(theme, callback_data=f"mtheme_{user_id}_{i}")]
+            for i, theme in enumerate(MEME_THEMES.keys())]
     rows.append([InlineKeyboardButton("🎲 Рандомна тема і підтема", callback_data=f"mtheme_{user_id}_random")])
-    rows.append([InlineKeyboardButton("⬅️ Назад", callback_data=f"photo_back_{user_id}")])
+    rows.append([InlineKeyboardButton("⬅️ Назад (стиль)",           callback_data=f"photo_meme_{user_id}")])
     return InlineKeyboardMarkup(rows)
 
 def meme_subtopics_keyboard(user_id: int, theme_idx: int) -> InlineKeyboardMarkup:
-    """Меню вибору підтеми після вибору теми."""
+    """Крок 3 мему — вибір підтеми."""
     theme_name = list(MEME_THEMES.keys())[theme_idx]
-    subtopics  = MEME_THEMES[theme_name]
-    rows = []
-    for j, sub in enumerate(subtopics):
-        rows.append([InlineKeyboardButton(sub, callback_data=f"msub_{user_id}_{theme_idx}_{j}")])
+    rows = [[InlineKeyboardButton(sub, callback_data=f"msub_{user_id}_{theme_idx}_{j}")]
+            for j, sub in enumerate(MEME_THEMES[theme_name])]
     rows.append([InlineKeyboardButton("🎲 Рандомна підтема", callback_data=f"msub_{user_id}_{theme_idx}_random")])
-    rows.append([InlineKeyboardButton("⬅️ До тем",           callback_data=f"photo_meme_{user_id}")])
+    rows.append([InlineKeyboardButton("⬅️ До тем",           callback_data=f"mtheme_back_{user_id}")])
     return InlineKeyboardMarkup(rows)
 
 # ────────────────────────────────────────────
@@ -597,7 +553,7 @@ async def webhook(request: Request):
             message_id  = callback["message"]["message_id"]
             cb_data     = callback["data"]
 
-            # ── Вибір стилю ────────────────────
+            # ── Змінити стиль (без мему) ────────
             if cb_data.startswith("style_"):
                 parts   = cb_data.split("_")
                 user_id = int(parts[1])
@@ -611,26 +567,54 @@ async def webhook(request: Request):
                 send_message(chat_id, f"⏳ Переробляю у стилі «{style['label']}»...")
                 try:
                     image_bytes = download_tg_photo(file_id)
-                    buf = restyle_image(image_bytes, style["prompt"])
-                    if buf:
-                        send_photo(chat_id, buf, caption=f"{style['label']} ✅")
+                    result      = restyle_image(image_bytes, style["prompt"])
+                    if result:
+                        send_photo(chat_id, io.BytesIO(result), caption=f"{style['label']} ✅")
                     else:
                         send_message(chat_id, "Не вдалося переробити. Спробуй інший стиль.")
                 except Exception as e:
-                    logging.error(f"Style помилка: {e}")
+                    logging.error(f"style: {e}")
                     send_message(chat_id, f"❌ Помилка: {e}")
                 pending_photos.pop(user_id, None)
                 answer_callback(callback_id)
                 return {"ok": True}
 
-            # ── Вибір теми → показуємо підтеми ──
+            # ── Мем Крок 1: вибір стилю ─────────
+            if cb_data.startswith("memestyle_"):
+                parts   = cb_data.split("_")
+                user_id = int(parts[1])
+                idx_raw = parts[2]
+                meme_style_sel[user_id] = None if idx_raw == "none" else int(idx_raw)
+                style_label = "без стилю" if idx_raw == "none" else STYLES[int(idx_raw)]["label"]
+                edit_message_text(
+                    chat_id, message_id,
+                    f"✅ Стиль: <b>{style_label}</b>\n\n😂 Крок 2 з 3 — Обери тему:",
+                    meme_themes_keyboard(user_id)
+                )
+                answer_callback(callback_id)
+                return {"ok": True}
+
+            # ── Мем: повернення до тем ──────────
+            if cb_data.startswith("mtheme_back_"):
+                user_id = int(cb_data.split("_")[2])
+                style_idx   = meme_style_sel.get(user_id)
+                style_label = "без стилю" if style_idx is None else STYLES[style_idx]["label"]
+                edit_message_text(
+                    chat_id, message_id,
+                    f"✅ Стиль: <b>{style_label}</b>\n\n😂 Обери тему:",
+                    meme_themes_keyboard(user_id)
+                )
+                answer_callback(callback_id)
+                return {"ok": True}
+
+            # ── Мем Крок 2: вибір теми ──────────
             if cb_data.startswith("mtheme_"):
                 parts   = cb_data.split("_")
                 user_id = int(parts[1])
                 idx_raw = parts[2]
 
                 if idx_raw == "random":
-                    # Рандомна тема і підтема — одразу генеруємо
+                    # Повністю рандомно — одразу генеруємо
                     file_id = pending_photos.get(user_id)
                     if not file_id:
                         send_message(chat_id, "Фото не знайдено, надішли ще раз.")
@@ -638,28 +622,25 @@ async def webhook(request: Request):
                         return {"ok": True}
                     theme_name = random.choice(list(MEME_THEMES.keys()))
                     subtopic   = random.choice(MEME_THEMES[theme_name])
-                    theme_hint = f"{theme_name}: {subtopic}"
-                    send_message(chat_id, f"⏳ Генерую мем на тему «{subtopic}»...")
-                    try:
-                        image_bytes = download_tg_photo(file_id)
-                        top, bottom = generate_meme_text(image_bytes, theme_hint)
-                        buf = add_meme_text(image_bytes, top, bottom)
-                        send_photo(chat_id, buf, caption=f"😂 {theme_name} — {subtopic}")
-                    except Exception as e:
-                        logging.error(f"Мем рандом помилка: {e}")
-                        send_message(chat_id, f"❌ Помилка: {e}")
+                    await _generate_meme(chat_id, user_id, file_id, theme_name, subtopic)
                     pending_photos.pop(user_id, None)
+                    meme_style_sel.pop(user_id, None)
                 else:
-                    # Показуємо список підтем для обраної теми
                     theme_idx  = int(idx_raw)
                     theme_name = list(MEME_THEMES.keys())[theme_idx]
-                    edit_message_text(chat_id, message_id,
-                                      f"📋 Обери підтему — <b>{theme_name}</b>:",
-                                      meme_subtopics_keyboard(user_id, theme_idx))
+                    style_idx  = meme_style_sel.get(user_id)
+                    style_label = "без стилю" if style_idx is None else STYLES[style_idx]["label"]
+                    edit_message_text(
+                        chat_id, message_id,
+                        f"✅ Стиль: <b>{style_label}</b>\n"
+                        f"✅ Тема: <b>{theme_name}</b>\n\n"
+                        f"📋 Крок 3 з 3 — Обери підтему:",
+                        meme_subtopics_keyboard(user_id, theme_idx)
+                    )
                 answer_callback(callback_id)
                 return {"ok": True}
 
-            # ── Вибір підтеми → генеруємо мем ──
+            # ── Мем Крок 3: вибір підтеми ───────
             if cb_data.startswith("msub_"):
                 parts     = cb_data.split("_")
                 user_id   = int(parts[1])
@@ -674,27 +655,15 @@ async def webhook(request: Request):
 
                 theme_name = list(MEME_THEMES.keys())[theme_idx]
                 subtopics  = MEME_THEMES[theme_name]
+                subtopic   = random.choice(subtopics) if sub_raw == "random" else subtopics[int(sub_raw)]
 
-                if sub_raw == "random":
-                    subtopic = random.choice(subtopics)
-                else:
-                    subtopic = subtopics[int(sub_raw)]
-
-                theme_hint = f"{theme_name}: {subtopic}"
-                send_message(chat_id, f"⏳ Генерую мем на тему «{subtopic}»...")
-                try:
-                    image_bytes = download_tg_photo(file_id)
-                    top, bottom = generate_meme_text(image_bytes, theme_hint)
-                    buf = add_meme_text(image_bytes, top, bottom)
-                    send_photo(chat_id, buf, caption=f"😂 {theme_name} — {subtopic}")
-                except Exception as e:
-                    logging.error(f"Мем підтема помилка: {e}")
-                    send_message(chat_id, f"❌ Помилка: {e}")
+                await _generate_meme(chat_id, user_id, file_id, theme_name, subtopic)
                 pending_photos.pop(user_id, None)
+                meme_style_sel.pop(user_id, None)
                 answer_callback(callback_id)
                 return {"ok": True}
 
-            # ── Головне меню фото ──────────────
+            # ── Головне меню фото ───────────────
             if cb_data.startswith("photo_"):
                 parts   = cb_data.split("_")
                 action  = parts[1]
@@ -714,10 +683,10 @@ async def webhook(request: Request):
                     return {"ok": True}
 
                 if action == "meme":
-                    # Показуємо меню тем через редагування повідомлення
+                    # Крок 1 — вибір стилю для мему
                     edit_message_text(chat_id, message_id,
-                                      "😂 Обери тему мему:",
-                                      meme_themes_keyboard(user_id))
+                                      "😂 Крок 1 з 3 — Обери стиль фото для мему:",
+                                      meme_style_keyboard(user_id))
                     answer_callback(callback_id)
                     return {"ok": True}
 
@@ -733,14 +702,14 @@ async def webhook(request: Request):
                         description = describe_image(image_bytes)
                         send_message(chat_id, f"🔍 <b>Що на фото:</b>\n\n{description}")
                     except Exception as e:
-                        logging.error(f"Describe помилка: {e}")
+                        logging.error(f"describe: {e}")
                         send_message(chat_id, f"❌ Помилка: {e}")
                     pending_photos.pop(user_id, None)
 
                 answer_callback(callback_id)
                 return {"ok": True}
 
-            # ── База знань ─────────────────────
+            # ── База знань ──────────────────────
             if cb_data.startswith("notfound_"):
                 user_id = int(cb_data.split("_")[1])
                 last    = get_history(user_id)
@@ -761,7 +730,7 @@ async def webhook(request: Request):
                     send_message(chat_id, answer)
                     add_to_history(user_id, "assistant", answer)
             except Exception as e:
-                logging.error(f"Callback помилка: {e}")
+                logging.error(f"callback: {e}")
             answer_callback(callback_id)
             return {"ok": True}
 
@@ -776,16 +745,15 @@ async def webhook(request: Request):
         if not chat_id:
             return {"ok": True}
 
-        # ── Отримали фото ──────────────────────
+        # ── Отримали фото ───────────────────────
         if "photo" in message:
             file_id = message["photo"][-1]["file_id"]
             caption = message.get("caption", "").strip().lower()
             pending_photos[user_id] = file_id
 
             if caption in ["мем", "meme"]:
-                send_message(chat_id, "😂 Обери тему мему:",
-                             reply_markup=meme_themes_keyboard(user_id))
-
+                send_message(chat_id, "😂 Крок 1 з 3 — Обери стиль фото для мему:",
+                             reply_markup=meme_style_keyboard(user_id))
             elif caption in ["опис", "describe", "що це"]:
                 send_message(chat_id, "⏳ Аналізую фото...")
                 try:
@@ -795,7 +763,6 @@ async def webhook(request: Request):
                 except Exception as e:
                     send_message(chat_id, f"❌ Помилка: {e}")
                 pending_photos.pop(user_id, None)
-
             else:
                 send_message(chat_id, "📸 Що зробити з цим фото?",
                              reply_markup=photo_action_keyboard(user_id))
@@ -804,25 +771,26 @@ async def webhook(request: Request):
         if not text:
             return {"ok": True}
 
-        # ── Команди ────────────────────────────
+        # ── Команди ─────────────────────────────
         if text == "/start":
             send_message(chat_id,
-                "👋 Привіт! Я поки тупий AI бот написаний Tiny.\n\n"
+                "👋 Привіт! Я розумний бот.\n\n"
                 "Що я вмію:\n"
                 "• Відповідати з бази знань\n"
                 "• Шукати в інтернеті якщо не знаю\n"
-                "• Генерувати картинки — команда /img опис\n"
-                "• 😂 Робити меми з тем (10 тем, купа підтем)\n"
+                "• Генерувати картинки — /img опис\n"
+                "• 😂 Меми: стиль + тема + підтема\n"
                 "• 🎨 Переробляти фото у 10 стилях\n"
                 "• 🔍 Описувати що на фото\n"
                 "• Пам'ятаю розмову\n\n"
-                "Запитай щось, або надішли фото — і побачиш варіанти!")
+                "Надішли фото — і побачиш варіанти!")
             return {"ok": True}
 
         if text == "/clear":
-            chat_history[user_id]  = []
+            chat_history[user_id] = []
             pending_answers.pop(user_id, None)
             pending_photos.pop(user_id, None)
+            meme_style_sel.pop(user_id, None)
             send_message(chat_id, "🗑 Пам'ять очищена!")
             return {"ok": True}
 
@@ -835,43 +803,64 @@ async def webhook(request: Request):
                 buf = generate_image(prompt)
                 send_photo(chat_id, buf, caption=f"🖼 {prompt}")
             except Exception as e:
-                logging.error(f"Генерація помилка: {e}")
+                logging.error(f"img: {e}")
                 send_message(chat_id, "Не вдалося згенерувати, спробуй пізніше.")
             return {"ok": True}
 
-        # ── База знань + інтернет ──────────────
+        # ── База знань + інтернет ────────────────
         add_to_history(user_id, "user", text)
         matches = search_knowledge(text)
 
         if len(matches) == 1:
             pending_answers[user_id] = matches
             keyboard = [
-                [InlineKeyboardButton(text=matches[0]["title"], callback_data=f"ans_{user_id}_0")],
-                [InlineKeyboardButton(text="❌ Не те, що шукав", callback_data=f"notfound_{user_id}")]
+                [InlineKeyboardButton(matches[0]["title"], callback_data=f"ans_{user_id}_0")],
+                [InlineKeyboardButton("❌ Не те, що шукав", callback_data=f"notfound_{user_id}")]
             ]
             send_message(chat_id, "🔍 Знайшов варіант — обери потрібний:",
                          reply_markup=InlineKeyboardMarkup(keyboard))
-
         elif len(matches) > 1:
             pending_answers[user_id] = matches
-            keyboard = [[InlineKeyboardButton(
-                text=m["title"], callback_data=f"ans_{user_id}_{i}"
-            )] for i, m in enumerate(matches)]
-            keyboard.append([InlineKeyboardButton(
-                text="❌ Не те, що шукав", callback_data=f"notfound_{user_id}"
-            )])
+            keyboard = [[InlineKeyboardButton(m["title"], callback_data=f"ans_{user_id}_{i}")]
+                        for i, m in enumerate(matches)]
+            keyboard.append([InlineKeyboardButton("❌ Не те, що шукав", callback_data=f"notfound_{user_id}")])
             send_message(chat_id, "🔍 Знайшов кілька варіантів — обери потрібний:",
                          reply_markup=InlineKeyboardMarkup(keyboard))
-
         else:
             answer = groq_web_answer(user_id, text)
             add_to_history(user_id, "assistant", answer)
             send_message(chat_id, answer)
 
     except Exception as e:
-        logging.error(f"Webhook помилка: {e}")
+        logging.error(f"webhook: {e}")
 
     return {"ok": True}
+
+# ────────────────────────────────────────────
+# Генерація мему (спільна логіка)
+# ────────────────────────────────────────────
+async def _generate_meme(chat_id: int, user_id: int, file_id: str, theme_name: str, subtopic: str):
+    style_idx   = meme_style_sel.get(user_id)
+    style_label = "без стилю" if style_idx is None else STYLES[style_idx]["label"]
+    send_message(chat_id, f"⏳ Генерую мем «{subtopic}» ({style_label})...")
+    try:
+        image_bytes = download_tg_photo(file_id)
+
+        # Якщо обрано стиль — спочатку переробляємо фото
+        if style_idx is not None:
+            restyled = restyle_image(image_bytes, STYLES[style_idx]["prompt"])
+            if restyled:
+                image_bytes = restyled
+            else:
+                send_message(chat_id, "⚠️ Стиль не вдався, накладаю текст на оригінал.")
+
+        theme_hint  = f"{theme_name}: {subtopic}"
+        top, bottom = generate_meme_text(image_bytes, theme_hint)
+        buf         = add_meme_text(image_bytes, top, bottom)
+        send_photo(chat_id, buf, caption=f"😂 {theme_name} — {subtopic}")
+    except Exception as e:
+        logging.error(f"_generate_meme: {e}")
+        send_message(chat_id, f"❌ Помилка: {e}")
 
 if __name__ == "__main__":
     uvicorn.run(fastapi_app, host="0.0.0.0", port=10000)

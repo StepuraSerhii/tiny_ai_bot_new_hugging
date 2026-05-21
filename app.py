@@ -683,7 +683,8 @@ def meme_themes_keyboard(user_id: int) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(theme, callback_data=f"mtheme_{user_id}_{i}")]
             for i, theme in enumerate(MEME_THEMES.keys())]
     rows.append([InlineKeyboardButton("🎲 Рандомна тема і підтема", callback_data=f"mtheme_{user_id}_random")])
-    rows.append([InlineKeyboardButton("⬅️ Назад (стиль)",           callback_data=f"photo_meme_{user_id}")])
+    rows.append([InlineKeyboardButton("🤯 Сюрприз від AI",            callback_data=f"mtheme_{user_id}_ai")])
+    rows.append([InlineKeyboardButton("⬅️ Назад (стиль)",             callback_data=f"photo_meme_{user_id}")])
     return InlineKeyboardMarkup(rows)
 
 def meme_subtopics_keyboard(user_id: int, theme_idx: int) -> InlineKeyboardMarkup:
@@ -928,15 +929,18 @@ async def webhook(request: Request):
                 user_id = int(parts[1])
                 idx_raw = parts[2]
 
-                if idx_raw == "random":
-                    # Повністю рандомно — одразу генеруємо
+                if idx_raw in ("random", "ai"):
                     file_id = pending_photos.get(user_id)
                     if not file_id:
                         send_message(chat_id, "Фото не знайдено, надішли ще раз.")
                         answer_callback(callback_id)
                         return {"ok": True}
-                    theme_name = random.choice(list(MEME_THEMES.keys()))
-                    subtopic   = random.choice(MEME_THEMES[theme_name])
+                    if idx_raw == "ai":
+                        edit_message_text(chat_id, message_id, "🤯 AI вигадує тему...")
+                        theme_name, subtopic = groq_random_theme()
+                    else:
+                        theme_name = random.choice(list(MEME_THEMES.keys()))
+                        subtopic   = random.choice(MEME_THEMES[theme_name])
                     await _generate_meme(chat_id, user_id, file_id, theme_name, subtopic)
                     pending_photos.pop(user_id, None)
                     meme_style_sel.pop(user_id, None)

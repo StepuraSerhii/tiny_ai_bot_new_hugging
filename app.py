@@ -577,7 +577,28 @@ def groq_web_answer(user_id: int, text: str) -> str:
 # STT: Groq Whisper — войс → текст
 # ────────────────────────────────────────────
 def transcribe_voice(audio_bytes: bytes, filename: str = "voice.ogg") -> str:
-    """Транскрибує аудіо через Groq Whisper."""
+    """Транскрибує аудіо через Groq Whisper.
+    Telegram надсилає OGG/OPUS — конвертуємо в MP3 через ffmpeg.
+    """
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-y", "-i", "pipe:0", "-ar", "16000", "-ac", "1",
+             "-f", "mp3", "pipe:1"],
+            input=audio_bytes,
+            capture_output=True,
+            timeout=30,
+        )
+        if proc.returncode == 0 and proc.stdout:
+            audio_bytes = proc.stdout
+            filename    = "voice.mp3"
+            logging.info("ffmpeg: конвертовано в MP3")
+        else:
+            logging.warning(f"ffmpeg код {proc.returncode}: {proc.stderr[:200]}")
+    except FileNotFoundError:
+        logging.warning("ffmpeg не знайдено — відправляємо як є")
+    except Exception as e:
+        logging.warning(f"ffmpeg помилка: {e}")
+
     try:
         transcription = groq_client.audio.transcriptions.create(
             model="whisper-large-v3",
@@ -585,9 +606,11 @@ def transcribe_voice(audio_bytes: bytes, filename: str = "voice.ogg") -> str:
             language="uk",
             response_format="text",
         )
-        return transcription.strip() if isinstance(transcription, str) else transcription.text.strip()
+        result = transcription.strip() if isinstance(transcription, str) else transcription.text.strip()
+        logging.info(f"Whisper: {result[:80]}")
+        return result
     except Exception as e:
-        logging.error(f"transcribe_voice: {e}")
+        logging.error(f"transcribe_voice Whisper: {e}")
         return ""
 
 # ────────────────────────────────────────────

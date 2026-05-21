@@ -508,6 +508,7 @@ KNOWLEDGE = load_knowledge()
 chat_history:    dict[int, list]         = {}
 pending_answers: dict[int, list]         = {}
 pending_photos:  dict[int, str]          = {}  # user_id -> file_id
+pending_voices:  dict[int, str]          = {}  # user_id -> file_id войсу
 meme_style_sel:  dict[int, int | None]   = {}  # user_id -> style idx або None
 user_voice_reply: dict[int, bool]        = {}  # user_id -> чи відповідати голосом
 
@@ -804,6 +805,37 @@ async def webhook(request: Request):
                 answer_callback(callback_id)
                 return {"ok": True}
 
+            # ── Голосовий підтверджуючий callback ──
+            if cb_data.startswith("voice_yes_") or cb_data.startswith("voice_no_"):
+                parts   = cb_data.split("_")
+                action  = parts[1]          # "yes" або "no"
+                user_id = int(parts[2])
+                file_id = pending_voices.get(user_id)
+
+                if action == "no" or not file_id:
+                    edit_message_text(chat_id, message_id, "👌 Добре, пропускаємо.")
+                    pending_voices.pop(user_id, None)
+                    answer_callback(callback_id)
+                    return {"ok": True}
+
+                # action == "yes"
+                edit_message_text(chat_id, message_id, "⏳ Розпізнаю...")
+                try:
+                    audio_bytes, file_path = download_tg_file(file_id)
+                    ext        = file_path.split(".")[-1] if "." in file_path else "ogg"
+                    transcript = transcribe_voice(audio_bytes, filename=f"voice.{ext}")
+                    if not transcript:
+                        edit_message_text(chat_id, message_id, "❌ Не вдалося розпізнати. Спробуй ще раз.")
+                    else:
+                        edit_message_text(chat_id, message_id, f"🎙 <b>Текст з аудіо:</b>\n\n{transcript}")
+                except Exception as e:
+                    logging.error(f"voice_yes: {e}")
+                    edit_message_text(chat_id, message_id, f"❌ Помилка: {e}")
+
+                pending_voices.pop(user_id, None)
+                answer_callback(callback_id)
+                return {"ok": True}
+
             # ── Зміна особистості бота ──────────
             if cb_data.startswith("persona_"):
                 parts       = cb_data.split("_", 2)
@@ -929,30 +961,14 @@ async def webhook(request: Request):
         if "voice" in message or "audio" in message:
             media   = message.get("voice") or message.get("audio")
             file_id = media["file_id"]
-            send_message(chat_id, "🎙 Розпізнаю голос...")
-            try:
-                audio_bytes, file_path = download_tg_file(file_id)
-                ext        = file_path.split(".")[-1] if "." in file_path else "ogg"
-                transcript = transcribe_voice(audio_bytes, filename=f"voice.{ext}")
-                if not transcript:
-                    send_message(chat_id, "❌ Не вдалося розпізнати. Спробуй ще раз.")
-                    return {"ok": True}
-                send_message(chat_id, f"🎙 <i>Ти сказав:</i> {transcript}")
-                add_to_history(user_id, "user", transcript)
-                matches = search_knowledge(transcript)
-                if matches:
-                    answer = matches[0]["answer"]
-                else:
-                    answer = groq_web_answer(user_id, transcript)
-                add_to_history(user_id, "assistant", answer)
-                send_message(chat_id, answer)
-                # Відповідаємо голосом якщо бажаєте — розкоментуйте:
-                # voice_buf = text_to_speech(answer)
-                # if voice_buf:
-                #     send_voice(chat_id, voice_buf)
-            except Exception as e:
-                logging.error(f"voice: {e}")
-                send_message(chat_id, f"❌ Помилка розпізнавання: {e}")
+            pending_voices[user_id] = file_id
+            keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("✅ Так, транскрибувати", callback_data=f"voice_yes_{user_id}"),
+                    InlineKeyboardButton("❌ Ні",                   callback_data=f"voice_no_{user_id}"),
+                ]
+            ])
+            send_message(chat_id, "🎙 Транскрибувати цей войс?", reply_markup=keyboard)
             return {"ok": True}
 
         if not text:
@@ -979,6 +995,7 @@ async def webhook(request: Request):
             chat_history[user_id] = []
             pending_answers.pop(user_id, None)
             pending_photos.pop(user_id, None)
+            pending_voices.pop(user_id, None)
             meme_style_sel.pop(user_id, None)
             user_personas.pop(user_id, None)
             user_voice_reply.pop(user_id, None)

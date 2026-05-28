@@ -433,6 +433,113 @@ def add_meme_text(image_bytes: bytes, top_text: str, bottom_text: str) -> io.Byt
     return buf
 
 # ────────────────────────────────────────────
+# Демотиватор: чорна рамка + фото + заголовок/підпис
+# ────────────────────────────────────────────
+def make_demotivator(image_bytes: bytes, title: str, subtitle: str = "") -> io.BytesIO:
+    """Класичний демотиватор: фото в білій рамці на чорному тлі,
+    великий заголовок (Times-style верхній регістр) і менший підпис."""
+    photo = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+
+    # Масштабуємо фото так щоб ширша сторона була ~800px
+    base_w = 800
+    ratio  = base_w / photo.width
+    photo  = photo.resize((base_w, int(photo.height * ratio)))
+    pw, ph = photo.size
+
+    # Геометрія рамок
+    border      = max(2, pw // 220)          # тонка біла лінія навколо фото
+    side_margin = int(pw * 0.09)             # чорне поле з боків
+    top_margin  = int(pw * 0.09)             # чорне поле зверху
+    title_size  = max(34, int(pw * 0.072))
+    sub_size    = max(22, int(pw * 0.040))
+
+    canvas_w = pw + side_margin * 2
+    # знизу місце під текст: заголовок + підпис + повітря
+    text_zone = top_margin + title_size + (sub_size + 10 if subtitle.strip() else 0) + int(pw * 0.05)
+    canvas_h  = top_margin + ph + text_zone
+
+    canvas = Image.new("RGB", (canvas_w, canvas_h), (0, 0, 0))
+    draw   = ImageDraw.Draw(canvas)
+
+    # Біла рамка навколо фото
+    fx, fy = side_margin, top_margin
+    draw.rectangle(
+        [fx - border, fy - border, fx + pw + border, fy + ph + border],
+        outline=(255, 255, 255), width=border
+    )
+    canvas.paste(photo, (fx, fy))
+
+    # Заголовок — великими літерами, по центру
+    max_text_w = canvas_w - side_margin
+    t_font, t_lines, t_lh, _ = _fit_text(draw, title, max_text_w, CYRILLIC_FONT, title_size, min_size=24)
+    y = fy + ph + int(pw * 0.04)
+    for line in t_lines:
+        try:
+            bbox = draw.textbbox((0, 0), line, font=t_font)
+            tw   = bbox[2] - bbox[0]
+        except Exception:
+            tw = len(line) * title_size // 2
+        draw.text(((canvas_w - tw) // 2, y), line, font=t_font, fill=(255, 255, 255))
+        y += t_lh
+
+    # Підпис — менший, теж по центру (звичайний регістр зберігаємо)
+    if subtitle.strip():
+        s_font = _load_font(sub_size)
+        for line in textwrap.wrap(subtitle, width=max(20, int(max_text_w / (sub_size * 0.5)))):
+            try:
+                bbox = draw.textbbox((0, 0), line, font=s_font)
+                sw   = bbox[2] - bbox[0]
+            except Exception:
+                sw = len(line) * sub_size // 2
+            draw.text(((canvas_w - sw) // 2, y + 6), line, font=s_font, fill=(220, 220, 220))
+            y += int(sub_size * 1.2)
+
+    buf = io.BytesIO()
+    canvas.save(buf, format="JPEG", quality=92)
+    buf.seek(0)
+    return buf
+
+def generate_demotivator_caption(image_bytes: bytes) -> tuple[str, str]:
+    """Groq vision вигадує філософсько-іронічний заголовок і підпис у стилі демотиватора."""
+    b64 = photo_to_base64(image_bytes)
+    try:
+        response = groq_client.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                    {"type": "text", "text": (
+                        "Ти створюєш демотиватори українською — іронічні або псевдо-філософські.\n"
+                        "Подивись на фото і придумай:\n"
+                        "ЗАГОЛОВОК: одне-два слова, ВЕЛИКИМИ, влучно й іронічно\n"
+                        "ПІДПИС: одне коротке речення-«мораль», саркастичне або життєве\n"
+                        "Відповідай СТРОГО у цьому форматі, без зайвого тексту."
+                    )}
+                ]
+            }],
+            max_tokens=90
+        )
+        raw = response.choices[0].message.content.strip()
+        logging.info(f"Demotivator raw: {repr(raw)}")
+        title, sub = "", ""
+        for line in raw.splitlines():
+            line = line.strip()
+            up = line.upper()
+            if up.startswith("ЗАГОЛОВОК:"):
+                title = line.split(":", 1)[1].strip()
+            elif up.startswith("ПІДПИС:"):
+                sub = line.split(":", 1)[1].strip()
+        if not title:
+            lines = [l.strip() for l in raw.splitlines() if l.strip()]
+            title = lines[0] if lines else "ЖИТТЯ"
+            sub   = lines[1] if len(lines) > 1 else ""
+        return title or "ЖИТТЯ", sub
+    except Exception as e:
+        logging.error(f"generate_demotivator_caption: {e}")
+        return "ЖИТТЯ", "Іноді фото говорить більше за слова."
+
+# ────────────────────────────────────────────
 # Переробка стилю: Groq описує → FLUX генерує
 # ────────────────────────────────────────────
 def restyle_image(image_bytes: bytes, style_prompt: str) -> bytes | None:
@@ -562,6 +669,7 @@ pending_voices:  dict[int, str]          = {}  # user_id -> file_id войсу
 meme_style_sel:  dict[int, int | None]   = {}  # user_id -> style idx або None
 user_voice_reply: dict[int, bool]        = {}  # user_id -> чи відповідати голосом
 pending_textmeme: dict[int, dict]         = {}  # user_id -> {theme, subtopic} поки чекаємо текст
+battle_votes:    dict[str, dict]          = {}  # battle_id -> {"A": set(uid), "B": set(uid)}
 
 def get_history(user_id: int) -> list:
     return chat_history.setdefault(user_id, [])
@@ -701,9 +809,18 @@ def generate_image(prompt: str) -> io.BytesIO:
 def photo_action_keyboard(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("😂 Зробити мем",   callback_data=f"photo_meme_{user_id}")],
+        [InlineKeyboardButton("🖼 Демотиватор",    callback_data=f"photo_demot_{user_id}")],
+        [InlineKeyboardButton("⚔️ Батл мемів",     callback_data=f"photo_battle_{user_id}")],
         [InlineKeyboardButton("🎨 Змінити стиль", callback_data=f"photo_styles_{user_id}")],
         [InlineKeyboardButton("🔍 Описати фото",  callback_data=f"photo_describe_{user_id}")],
     ])
+
+def battle_vote_keyboard(battle_id: str, votes_a: int = 0, votes_b: int = 0) -> InlineKeyboardMarkup:
+    """Кнопки голосування для батлу мемів."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(f"🅰️ {votes_a}", callback_data=f"battle_{battle_id}_A"),
+        InlineKeyboardButton(f"🅱️ {votes_b}", callback_data=f"battle_{battle_id}_B"),
+    ]])
 
 def persona_keyboard(user_id: int) -> InlineKeyboardMarkup:
     """Клавіатура вибору особистості бота."""
@@ -1147,6 +1264,29 @@ async def webhook(request: Request):
                 answer_callback(callback_id)
                 return {"ok": True}
 
+            # ── Голосування в батлі мемів ───────
+            if cb_data.startswith("battle_"):
+                # формат: battle_{battle_id}_{A|B}, battle_id = "<uid>-<rnd>"
+                choice    = cb_data.rsplit("_", 1)[1]          # A або B
+                battle_id = cb_data[len("battle_"):-(len(choice) + 1)]
+                voter     = callback["from"]["id"]
+                votes     = battle_votes.setdefault(battle_id, {"A": set(), "B": set()})
+                # один голос на людину: знімаємо з протилежного
+                other = "B" if choice == "A" else "A"
+                votes[other].discard(voter)
+                if voter in votes[choice]:
+                    votes[choice].discard(voter)          # повторний клік = відкликати
+                else:
+                    votes[choice].add(voter)
+                a, b = len(votes["A"]), len(votes["B"])
+                try:
+                    edit_message_keyboard(chat_id, message_id,
+                                          battle_vote_keyboard(battle_id, a, b))
+                except Exception as e:
+                    logging.error(f"battle vote: {e}")
+                answer_callback(callback_id)
+                return {"ok": True}
+
             # ── Головне меню фото ───────────────
             if cb_data.startswith("photo_"):
                 parts   = cb_data.split("_")
@@ -1188,6 +1328,22 @@ async def webhook(request: Request):
                     except Exception as e:
                         logging.error(f"describe: {e}")
                         send_message(chat_id, f"❌ Помилка: {e}")
+                    pending_photos.pop(user_id, None)
+
+                if action == "demot":
+                    send_message(chat_id, "⏳ Роблю демотиватор...")
+                    try:
+                        image_bytes  = download_tg_photo(file_id)
+                        title, sub   = generate_demotivator_caption(image_bytes)
+                        buf          = make_demotivator(image_bytes, title, sub)
+                        send_photo(chat_id, buf, caption="🖼 Демотиватор готовий")
+                    except Exception as e:
+                        logging.error(f"demot: {e}")
+                        send_message(chat_id, f"❌ Помилка: {e}")
+                    pending_photos.pop(user_id, None)
+
+                if action == "battle":
+                    await _generate_meme_battle(chat_id, user_id, file_id)
                     pending_photos.pop(user_id, None)
 
                 answer_callback(callback_id)
@@ -1304,6 +1460,8 @@ async def webhook(request: Request):
                 "• 🌐 Шукати в інтернеті\n"
                 "• 🖼 Генерувати картинки — /img опис\n"
                 "• 😂 Меми: стиль + тема + підтема\n"
+                "• 🖼 Демотиватори з фото\n"
+                "• ⚔️ Батл мемів — два варіанти + голосування\n"
                 "• 🎨 Переробляти фото у 10 стилях\n"
                 "• 🔍 Описувати що на фото\n"
                 "• 🎙 Розуміти голосові повідомлення\n"
@@ -1441,6 +1599,40 @@ async def _generate_meme(chat_id: int, user_id: int, file_id: str, theme_name: s
         send_photo(chat_id, buf, caption=f"😂 {theme_name} — {subtopic}")
     except Exception as e:
         logging.error(f"_generate_meme: {e}")
+        send_message(chat_id, f"❌ Помилка: {e}")
+
+# ────────────────────────────────────────────
+# Батл мемів: два варіанти на одне фото + голосування
+# ────────────────────────────────────────────
+async def _generate_meme_battle(chat_id: int, user_id: int, file_id: str):
+    send_message(chat_id, "⚔️ Готую два меми для батлу...")
+    try:
+        image_bytes = download_tg_photo(file_id)
+
+        # Дві випадкові теми для різноманіття
+        themes = list(MEME_THEMES.keys())
+        t1 = random.choice(themes)
+        t2 = random.choice([t for t in themes if t != t1] or themes)
+        s1 = random.choice(MEME_THEMES[t1])
+        s2 = random.choice(MEME_THEMES[t2])
+
+        top1, bot1 = generate_meme_text(image_bytes, f"{t1}: {s1}")
+        top2, bot2 = generate_meme_text(image_bytes, f"{t2}: {s2}")
+        buf_a = add_meme_text(image_bytes, top1, bot1)
+        buf_b = add_meme_text(image_bytes, top2, bot2)
+
+        battle_id = f"{user_id}-{random.randint(1000, 9999)}"
+        battle_votes[battle_id] = {"A": set(), "B": set()}
+
+        send_photo(chat_id, buf_a, caption="🅰️ Варіант A")
+        send_photo(chat_id, buf_b, caption="🅱️ Варіант B")
+        send_message(
+            chat_id,
+            "⚔️ <b>Батл мемів!</b> Який смішніший?\nТисни 🅰️ або 🅱️ (можна змінити голос):",
+            reply_markup=battle_vote_keyboard(battle_id, 0, 0)
+        )
+    except Exception as e:
+        logging.error(f"_generate_meme_battle: {e}")
         send_message(chat_id, f"❌ Помилка: {e}")
 
 if __name__ == "__main__":

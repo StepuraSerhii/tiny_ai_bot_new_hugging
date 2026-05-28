@@ -280,8 +280,9 @@ def photo_to_base64(image_bytes: bytes) -> str:
 # ────────────────────────────────────────────
 # Мем: генерація тексту через Groq vision
 # ────────────────────────────────────────────
-def describe_meme_scene(image_bytes: bytes) -> str:
-    """Короткий опис головного на фото (об'єкт, дія, настрій) — щоб мем чіплявся за фото."""
+def describe_photo_scene(image_bytes: bytes) -> str:
+    """Короткий опис головного на фото (об'єкт, дія, настрій).
+    Спільна «прив'язка до фото» для мемів, демотиваторів тощо."""
     b64 = photo_to_base64(image_bytes)
     try:
         r = groq_client.chat.completions.create(
@@ -299,10 +300,10 @@ def describe_meme_scene(image_bytes: bytes) -> str:
             max_tokens=60
         )
         scene = r.choices[0].message.content.strip()
-        logging.info(f"Meme scene: {scene!r}")
+        logging.info(f"Photo scene: {scene!r}")
         return scene
     except Exception as e:
-        logging.error(f"describe_meme_scene: {e}")
+        logging.error(f"describe_photo_scene: {e}")
         return ""
 
 def generate_meme_text(image_bytes: bytes, theme_hint: str = "", scene: str | None = None) -> tuple[str, str]:
@@ -310,7 +311,7 @@ def generate_meme_text(image_bytes: bytes, theme_hint: str = "", scene: str | No
     scene можна передати готовим (для батлу), щоб не описувати фото двічі."""
     b64 = photo_to_base64(image_bytes)
     if scene is None:
-        scene = describe_meme_scene(image_bytes)
+        scene = describe_photo_scene(image_bytes)
 
     scene_line = f"На фото: {scene}\n" if scene else ""
     if theme_hint:
@@ -540,9 +541,13 @@ def make_demotivator(image_bytes: bytes, title: str, subtitle: str = "") -> io.B
     buf.seek(0)
     return buf
 
-def generate_demotivator_caption(image_bytes: bytes) -> tuple[str, str]:
-    """Groq vision вигадує філософсько-іронічний заголовок і підпис у стилі демотиватора."""
+def generate_demotivator_caption(image_bytes: bytes, scene: str | None = None) -> tuple[str, str]:
+    """Groq vision вигадує іронічний заголовок і підпис демотиватора,
+    прив'язані САМЕ до вмісту фото. scene можна передати готовим."""
     b64 = photo_to_base64(image_bytes)
+    if scene is None:
+        scene = describe_photo_scene(image_bytes)
+    scene_line = f"На фото: {scene}\n" if scene else ""
     try:
         response = groq_client.chat.completions.create(
             model="meta-llama/llama-4-scout-17b-16e-instruct",
@@ -552,7 +557,8 @@ def generate_demotivator_caption(image_bytes: bytes) -> tuple[str, str]:
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
                     {"type": "text", "text": (
                         "Ти створюєш демотиватори українською — іронічні або псевдо-філософські.\n"
-                        "Подивись на фото і придумай:\n"
+                        f"{scene_line}"
+                        "Придумай, спираючись САМЕ на те, що на фото (а не загальне):\n"
                         "ЗАГОЛОВОК: одне-два слова, ВЕЛИКИМИ, влучно й іронічно\n"
                         "ПІДПИС: одне коротке речення-«мораль», саркастичне або життєве\n"
                         "Відповідай СТРОГО у цьому форматі, без зайвого тексту."
@@ -1658,7 +1664,7 @@ async def _generate_meme_battle(chat_id: int, user_id: int, file_id: str):
         s2 = random.choice(MEME_THEMES[t2])
 
         # Описуємо фото один раз — обидва варіанти прив'язані до того ж вмісту
-        scene = describe_meme_scene(image_bytes)
+        scene = describe_photo_scene(image_bytes)
         top1, bot1 = generate_meme_text(image_bytes, f"{t1}: {s1}", scene=scene)
         top2, bot2 = generate_meme_text(image_bytes, f"{t2}: {s2}", scene=scene)
         buf_a = add_meme_text(image_bytes, top1, bot1)

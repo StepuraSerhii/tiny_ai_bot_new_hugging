@@ -127,35 +127,76 @@ CYRILLIC_FONT = ensure_cyrillic_font()
 # Теми мемів з підтемами
 # ────────────────────────────────────────────
 MEME_THEMES = {
-    "😂 Життя / побут": [
-        "понеділок вранці", "прокидатися рано", "забути де поклав ключі",
-        "дієта яка не йде", "чекати доставку", "черга в супермаркеті",
-        "прибирання яке відкладаєш", "будильник о 6 ранку", "холодильник вночі",
-        "загубив навушники", "інтернет завис у важливий момент",
+    "🎧 Сапорт: тупі клієнти": [
+        "клієнт не читає інструкцію",
+        "«у мене все зламалося» без жодних деталей",
+        "пробували перезавантажити?",
+        "клієнт телефонує замість тікета",
+        "клієнт пише о 23:55 у п'ятницю",
+        "клієнт у CAPS LOCK",
+        "клієнт який знає краще за тебе",
+        "ескалація до менеджера через дрібницю",
+        "клієнт каже «мені порекомендували вас»",
+        "клієнт чекає миттєвої відповіді",
+        "клієнт скаржиться на власну помилку",
+        "клієнт надсилає скрін без скрін",
+        "клієнт «це у вас на сайті не працює» — а в нього вимкнений wi-fi",
+        "клієнт відкриває 5 тікетів про одне",
+        "клієнт обіцяє «знайомому юристу»",
     ],
-    "💼 Робота / офіс": [
-        "п'ятниця о 17:00", "мітинг який міг бути листом", "дедлайн завтра",
-        "начальник і відпустка", "zoom дзвінок", "корпоратив",
-        "підвищення зарплати", "понаднормова робота", "колега що шумить",
-        "принтер не працює", "відпустка відхилена",
+    "💻 IT / робота розробників": [
+        "продакшн упав у п'ятницю",
+        "«у мене працює»",
+        "merge conflict на 200 файлів",
+        "дедлайн завтра, естімейт два тижні",
+        "PM питає «коли буде готово»",
+        "девопс і кубернетес",
+        "stand-up який міг бути листом",
+        "код який працював вчора",
+        "1 рядок змін → 4 години рев'ю",
+        "тести проходять локально",
+        "клієнт хоче «маленьке виправлення»",
+        "git push --force у мейн",
     ],
-    "🐶 Тварини": [
-        "кіт о 3 ночі", "собака і прогулянка", "кіт і клавіатура",
-        "собака і листоноша", "кіт і коробка", "хом'як у колесі",
-        "кіт і ялинка", "собака їсть чужу їжу", "кіт і пакет",
-        "собака і дощ", "кіт і двері",
+    "🏠 Українські реалії": [
+        "комуналка взимку",
+        "ЖЕК і опалення",
+        "маршрутка і здача",
+        "ціни в АТБ",
+        "відключення світла за графіком",
+        "сусід з перфоратором о 7 ранку",
+        "повітряна тривога вночі",
+        "паркування у дворі",
+        "черга в Укрпошті",
+        "Дія яка щось не може",
+        "ринок vs супермаркет",
+        "ями на дорогах",
     ],
-    "🇺🇦 Українські реалії": [
-        "комуналка взимку", "черга в держслужбі", "маршрутка",
-        "ціни в супермаркеті", "ями на дорогах", "відключення світла",
-        "сусід з перфоратором", "ринок vs супермаркет",
-        "держпослуги онлайн", "черга в пошті", "парковка в Києві",
+    "❤️ Стосунки і побачення": [
+        "Tinder vs реальність",
+        "перше побачення",
+        "«нам треба поговорити»",
+        "пише о 2 ночі «не спиш?»",
+        "колишня в інстаграмі",
+        "знайомство з батьками",
+        "сварка через посуд",
+        "годинник тиші після «нічого»",
+        "він/вона залипає в телефоні",
+        "запросили на весілля",
+        "побачення наосліп",
     ],
-    "💸 Гроші": [
-        "зарплата і борги", "знижка 10% і купив непотрібне", "кредит",
-        "економія vs бажання", "зарплата прийшла і одразу пішла",
-        "інвестиції для початківців", "чай вдома vs кава в кафе",
-        "розпродаж і кошик на 5000", "страхування авто", "курс долара",
+    "🐱 Тварини": [
+        "кіт о 3 ночі",
+        "собака і прогулянка під дощем",
+        "кіт і клавіатура під час дзвінка",
+        "собака і пилосос",
+        "кіт у коробці з-під капців",
+        "хом'як у колесі о 4 ранку",
+        "кіт і ялинка",
+        "собака їсть чужу їжу зі столу",
+        "кіт дивиться у стіну",
+        "пес зустрічає з роботи",
+        "кіт і ванна",
     ],
 }
 
@@ -742,6 +783,7 @@ meme_style_sel:  dict[int, int | None]   = {}  # user_id -> style idx або Non
 user_voice_reply: dict[int, bool]        = {}  # user_id -> чи відповідати голосом
 pending_textmeme: dict[int, dict]         = {}  # user_id -> {theme, subtopic} поки чекаємо текст
 battle_votes:    dict[str, dict]          = {}  # battle_id -> {"A": set(uid), "B": set(uid)}
+meme_redo_ctx:   dict[int, dict]          = {}  # user_id -> {"file_id": str, "style_idx": int|None} для рероллу
 
 def get_history(user_id: int) -> list:
     return chat_history.setdefault(user_id, [])
@@ -910,30 +952,19 @@ def styles_keyboard(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 def meme_style_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    """Крок 1 мему — вибір стилю фото."""
+    """Єдиний крок фото-мему — вибір стилю фото.
+    Після цього бот сам ловить тему з фото і одразу робить мем."""
     rows = [[InlineKeyboardButton(s["label"], callback_data=f"memestyle_{user_id}_{i}")]
             for i, s in enumerate(STYLES)]
     rows.append([InlineKeyboardButton("⏭ Без стилю — лише текст", callback_data=f"memestyle_{user_id}_none")])
     rows.append([InlineKeyboardButton("⬅️ Назад",                  callback_data=f"photo_back_{user_id}")])
     return InlineKeyboardMarkup(rows)
 
-def meme_themes_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    """Крок 2 мему — вибір теми."""
-    rows = [[InlineKeyboardButton(theme, callback_data=f"mtheme_{user_id}_{i}")]
-            for i, theme in enumerate(MEME_THEMES.keys())]
-    rows.append([InlineKeyboardButton("🎲 Рандомна тема і підтема", callback_data=f"mtheme_{user_id}_random")])
-    rows.append([InlineKeyboardButton("🤯 Сюрприз від AI",            callback_data=f"mtheme_{user_id}_ai")])
-    rows.append([InlineKeyboardButton("⬅️ Назад (стиль)",             callback_data=f"photo_meme_{user_id}")])
-    return InlineKeyboardMarkup(rows)
-
-def meme_subtopics_keyboard(user_id: int, theme_idx: int) -> InlineKeyboardMarkup:
-    """Крок 3 мему — вибір підтеми."""
-    theme_name = list(MEME_THEMES.keys())[theme_idx]
-    rows = [[InlineKeyboardButton(sub, callback_data=f"msub_{user_id}_{theme_idx}_{j}")]
-            for j, sub in enumerate(MEME_THEMES[theme_name])]
-    rows.append([InlineKeyboardButton("🎲 Рандомна підтема", callback_data=f"msub_{user_id}_{theme_idx}_random")])
-    rows.append([InlineKeyboardButton("⬅️ До тем",           callback_data=f"mtheme_back_{user_id}")])
-    return InlineKeyboardMarkup(rows)
+def meme_redo_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """З'являється під готовим фото-мемом — дозволяє швидко перегенерити."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Інший варіант", callback_data=f"memeredo_{user_id}")]
+    ])
 
 # ────────────────────────────────────────────
 # Текстовий мем: генерує зображення + текст без фото
@@ -977,22 +1008,40 @@ def generate_text_meme(theme_hint: str, user_text: str) -> tuple[str, str, str]:
     Groq придумує смішний текст І детальний image prompt для FLUX.
     """
     user_part = f'Додатково юзер написав: "{user_text}". Врахуй це у тексті мему.' if user_text.strip() else ""
+    is_support = "сапорт" in theme_hint.lower() or "клієнт" in theme_hint.lower()
+    pov_line = (
+        "ВАЖЛИВО: жарт з ПЕРСПЕКТИВИ виснаженого сапорт-агента, "
+        "клієнт — об'єкт іронії і втоми, не герой.\n"
+        if is_support else ""
+    )
     system = (
-        "Ти експерт з мемів та промптів для Stable Diffusion / FLUX. "
-        "Твоє завдання — придумати смішний мем І написати детальний image prompt "
-        "який точно відображає ситуацію з мему. "
-        "Image prompt має бути: конкретна смішна сцена, персонажі, їх емоції та дії, "
-        "стиль cartoon/illustration. НЕ загальний — а саме та ситуація яка в мемі. "
-        "Наприклад для теми 'принтер не працює': "
-        "'frustrated office worker staring at broken printer with smoke coming out, "
-        "cartoon style, exaggerated angry expression, office background' — "
-        "а НЕ просто 'funny office cartoon'."
+        "Ти експерт з мемів у стилі живого українського інтернету та промптів для FLUX.\n"
+        "СТИЛЬ ТЕКСТУ: гострий, з НЕСПОДІВАНИМ ПОВОРОТОМ, абсурдний, саркастичний — "
+        "як пише жива людина в Telegram-чаті, а не редакція дитячого журналу.\n"
+        "Дозволено і ВІТАЄТЬСЯ український мат (бляха, нахуй, пиздець, охуївати, "
+        "заєбати, ой бля) — використовуй там, де він підсилює жарт.\n"
+        "\n"
+        "ЗАБОРОНЕНО:\n"
+        "- банальна спостережливість («коли понеділок» — «знову на роботу»)\n"
+        "- починати верхній рядок з «Коли»\n"
+        "- формула «очікування — реальність»\n"
+        "- безпечний нейтральний гумор «для всієї родини»\n"
+        "\n"
+        "ДОБРЕ — твіст, перебільшення, абсурд, темний гумор, конкретні деталі.\n"
+        "\n"
+        "IMAGE PROMPT: конкретна смішна сцена, персонажі, їх емоції та дії, "
+        "cartoon/illustration style. НЕ загальний — саме та ситуація з мему.\n"
+        "Приклад для 'принтер не працює': "
+        "'frustrated office worker staring at smoking printer, cartoon style, "
+        "exaggerated angry expression, office background'."
     )
     prompt = (
-        f"Тема мему: \"{theme_hint}\". {user_part}\n\n"
+        f"Тема мему: \"{theme_hint}\". {user_part}\n"
+        f"{pov_line}"
+        "\n"
         "Відповідай СТРОГО у форматі (лише ці 3 рядки, нічого зайвого):\n"
-        "ВЕРХ: [смішний текст українською, макс 6 слів]\n"
-        "НИЗ: [смішний текст українською, макс 6 слів]\n"
+        "ВЕРХ: [текст українською, макс 6 слів]\n"
+        "НИЗ: [текст українською з ТВІСТОМ, макс 6 слів]\n"
         "КАРТИНКА: [детальний англійський prompt для FLUX — конкретна сцена з мему, "
         "персонажі + їх емоції + дія + фон, cartoon illustration style, макс 25 слів]"
     )
@@ -1003,8 +1052,8 @@ def generate_text_meme(theme_hint: str, user_text: str) -> tuple[str, str, str]:
                 {"role": "system", "content": system},
                 {"role": "user",   "content": prompt},
             ],
-            max_tokens=150,
-            temperature=0.9,
+            max_tokens=180,
+            temperature=1.1,
         )
         raw = response.choices[0].message.content.strip()
         logging.info(f"TextMeme raw: {repr(raw)}")
@@ -1067,21 +1116,19 @@ def textmeme_skip_keyboard(user_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎲 Придумай сам", callback_data=f"tmskip_{user_id}")]
     ])
 
+def textmeme_root_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Точка входу /meme — 3 шляхи замість дерева тема→підтема."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎲 Повний сюрприз",   callback_data=f"tmroot_{user_id}_surprise")],
+        [InlineKeyboardButton("📋 По темі",          callback_data=f"tmroot_{user_id}_themes")],
+        [InlineKeyboardButton("✍️ Свій текст",       callback_data=f"tmroot_{user_id}_custom")],
+    ])
+
 def textmeme_themes_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    """Вибір теми для мему без фото."""
+    """5 широких тем — без підтем (вони обираються рандомно всередині)."""
     rows = [[InlineKeyboardButton(theme, callback_data=f"tmtheme_{user_id}_{i}")]
             for i, theme in enumerate(MEME_THEMES.keys())]
-    rows.append([InlineKeyboardButton("🎲 Рандомна тема",    callback_data=f"tmtheme_{user_id}_random")])
-    rows.append([InlineKeyboardButton("🤯 Сюрприз від AI",   callback_data=f"tmtheme_{user_id}_ai")])
-    return InlineKeyboardMarkup(rows)
-
-def textmeme_subtopics_keyboard(user_id: int, theme_idx: int) -> InlineKeyboardMarkup:
-    """Вибір підтеми для мему без фото."""
-    theme_name = list(MEME_THEMES.keys())[theme_idx]
-    rows = [[InlineKeyboardButton(sub, callback_data=f"tmsub_{user_id}_{theme_idx}_{j}")]
-            for j, sub in enumerate(MEME_THEMES[theme_name])]
-    rows.append([InlineKeyboardButton("🎲 Рандомна підтема", callback_data=f"tmsub_{user_id}_{theme_idx}_random")])
-    rows.append([InlineKeyboardButton("⬅️ До тем", callback_data=f"tmtheme_back_{user_id}")])
+    rows.append([InlineKeyboardButton("⬅️ Назад", callback_data=f"tmroot_{user_id}_back")])
     return InlineKeyboardMarkup(rows)
 
 # ────────────────────────────────────────────
@@ -1134,144 +1181,90 @@ async def webhook(request: Request):
                 answer_callback(callback_id)
                 return {"ok": True}
 
-            # ── Мем Крок 1: вибір стилю ─────────
+            # ── Фото-мем: вибір стилю → ОДРАЗУ генерація ──
+            # (теми/підтеми більше нема — бот сам ловить кут з фото)
             if cb_data.startswith("memestyle_"):
                 parts   = cb_data.split("_")
                 user_id = int(parts[1])
                 idx_raw = parts[2]
-                meme_style_sel[user_id] = None if idx_raw == "none" else int(idx_raw)
-                style_label = "без стилю" if idx_raw == "none" else STYLES[int(idx_raw)]["label"]
-                edit_message_text(
-                    chat_id, message_id,
-                    f"✅ Стиль: <b>{style_label}</b>\n\n😂 Крок 2 з 3 — Обери тему:",
-                    meme_themes_keyboard(user_id)
-                )
-                answer_callback(callback_id)
-                return {"ok": True}
-
-            # ── Мем: повернення до тем ──────────
-            if cb_data.startswith("mtheme_back_"):
-                user_id = int(cb_data.split("_")[2])
-                style_idx   = meme_style_sel.get(user_id)
-                style_label = "без стилю" if style_idx is None else STYLES[style_idx]["label"]
-                edit_message_text(
-                    chat_id, message_id,
-                    f"✅ Стиль: <b>{style_label}</b>\n\n😂 Обери тему:",
-                    meme_themes_keyboard(user_id)
-                )
-                answer_callback(callback_id)
-                return {"ok": True}
-
-            # ── Мем Крок 2: вибір теми ──────────
-            if cb_data.startswith("mtheme_"):
-                parts   = cb_data.split("_")
-                user_id = int(parts[1])
-                idx_raw = parts[2]
-
-                if idx_raw in ("random", "ai"):
-                    file_id = pending_photos.get(user_id)
-                    if not file_id:
-                        send_message(chat_id, "Фото не знайдено, надішли ще раз.")
-                        answer_callback(callback_id)
-                        return {"ok": True}
-                    if idx_raw == "ai":
-                        edit_message_text(chat_id, message_id, "🤯 AI вигадує тему...")
-                        theme_name, subtopic = groq_random_theme()
-                    else:
-                        theme_name = random.choice(list(MEME_THEMES.keys()))
-                        subtopic   = random.choice(MEME_THEMES[theme_name])
-                    await _generate_meme(chat_id, user_id, file_id, theme_name, subtopic)
-                    pending_photos.pop(user_id, None)
-                    meme_style_sel.pop(user_id, None)
-                else:
-                    theme_idx  = int(idx_raw)
-                    theme_name = list(MEME_THEMES.keys())[theme_idx]
-                    style_idx  = meme_style_sel.get(user_id)
-                    style_label = "без стилю" if style_idx is None else STYLES[style_idx]["label"]
-                    edit_message_text(
-                        chat_id, message_id,
-                        f"✅ Стиль: <b>{style_label}</b>\n"
-                        f"✅ Тема: <b>{theme_name}</b>\n\n"
-                        f"📋 Крок 3 з 3 — Обери підтему:",
-                        meme_subtopics_keyboard(user_id, theme_idx)
-                    )
-                answer_callback(callback_id)
-                return {"ok": True}
-
-            # ── Мем Крок 3: вибір підтеми ───────
-            if cb_data.startswith("msub_"):
-                parts     = cb_data.split("_")
-                user_id   = int(parts[1])
-                theme_idx = int(parts[2])
-                sub_raw   = parts[3]
-                file_id   = pending_photos.get(user_id)
-
+                file_id = pending_photos.get(user_id)
                 if not file_id:
                     send_message(chat_id, "Фото не знайдено, надішли ще раз.")
                     answer_callback(callback_id)
                     return {"ok": True}
-
-                theme_name = list(MEME_THEMES.keys())[theme_idx]
-                subtopics  = MEME_THEMES[theme_name]
-                subtopic   = random.choice(subtopics) if sub_raw == "random" else subtopics[int(sub_raw)]
-
-                await _generate_meme(chat_id, user_id, file_id, theme_name, subtopic)
+                style_idx = None if idx_raw == "none" else int(idx_raw)
+                meme_style_sel[user_id] = style_idx
+                # Зберігаємо контекст щоб «Інший варіант» міг перегенерувати
+                meme_redo_ctx[user_id] = {"file_id": file_id, "style_idx": style_idx}
+                answer_callback(callback_id)
+                await _generate_meme(chat_id, user_id, file_id)
                 pending_photos.pop(user_id, None)
                 meme_style_sel.pop(user_id, None)
-                answer_callback(callback_id)
                 return {"ok": True}
 
-            # ── Текстовий мем: вибір теми ────────
-            if cb_data.startswith("tmtheme_back_"):
-                user_id = int(cb_data.split("_")[2])
-                edit_message_text(chat_id, message_id,
-                    "😂 Обери тему для мему:",
-                    textmeme_themes_keyboard(user_id))
+            # ── Фото-мем: «🔄 Інший варіант» ──
+            if cb_data.startswith("memeredo_"):
+                user_id = int(cb_data.split("_")[1])
+                ctx     = meme_redo_ctx.get(user_id)
+                if not ctx:
+                    send_message(chat_id, "Контекст утрачено — надішли фото ще раз.")
+                    answer_callback(callback_id)
+                    return {"ok": True}
+                meme_style_sel[user_id] = ctx["style_idx"]
                 answer_callback(callback_id)
+                await _generate_meme(chat_id, user_id, ctx["file_id"])
+                meme_style_sel.pop(user_id, None)
                 return {"ok": True}
 
-            if cb_data.startswith("tmtheme_"):
+            # ── Текстовий мем: рут-меню (3 шляхи) ──
+            if cb_data.startswith("tmroot_"):
                 parts   = cb_data.split("_")
                 user_id = int(parts[1])
-                idx_raw = parts[2]
-                if idx_raw in ("random", "ai"):
-                    if idx_raw == "ai":
-                        edit_message_text(chat_id, message_id, "🤯 AI вигадує тему...")
-                        theme_name, subtopic = groq_random_theme()
-                    else:
-                        theme_name = random.choice(list(MEME_THEMES.keys()))
-                        subtopic   = random.choice(MEME_THEMES[theme_name])
-                    pending_textmeme[user_id] = {"theme": theme_name, "subtopic": subtopic}
-                    edit_message_text(chat_id, message_id,
-                        f"✅ Тема: <b>{theme_name}</b>\n"
-                        f"✅ Підтема: <b>{subtopic}</b>\n\n"
-                        "✍️ Напиши текст для мему — або натисни кнопку:",
-                        textmeme_skip_keyboard(user_id))
-                else:
-                    theme_idx  = int(idx_raw)
-                    theme_name = list(MEME_THEMES.keys())[theme_idx]
-                    edit_message_text(chat_id, message_id,
-                        f"✅ Тема: <b>{theme_name}</b>\n\n📋 Обери підтему:",
-                        textmeme_subtopics_keyboard(user_id, theme_idx))
-                answer_callback(callback_id)
-                return {"ok": True}
+                action  = parts[2]  # surprise | themes | custom | back
 
-            # ── Текстовий мем: вибір підтеми ────
-            if cb_data.startswith("tmsub_"):
-                parts     = cb_data.split("_")
-                user_id   = int(parts[1])
-                theme_idx = int(parts[2])
-                sub_raw   = parts[3]
+                if action == "surprise":
+                    # Повний рандом: AI вигадує і тему, і підтему
+                    edit_message_text(chat_id, message_id, "🎲 Готую сюрприз...")
+                    theme_name, subtopic = groq_random_theme()
+                    answer_callback(callback_id)
+                    await _generate_text_meme_and_send(chat_id, user_id,
+                                                       theme_name, subtopic, user_text="")
+                    return {"ok": True}
+
+                if action == "themes":
+                    edit_message_text(chat_id, message_id,
+                        "📋 Обери тему:",
+                        textmeme_themes_keyboard(user_id))
+                    answer_callback(callback_id)
+                    return {"ok": True}
+
+                if action == "custom":
+                    # Чекаємо на свій текст. Без теми — позначимо custom-плейсхолдером.
+                    pending_textmeme[user_id] = {"theme": "✍️ Своє", "subtopic": "—", "custom": True}
+                    edit_message_text(chat_id, message_id,
+                        "✍️ Напиши тему / текст для мему наступним повідомленням.\n"
+                        "Або тисни кнопку, щоб бот придумав сам:",
+                        textmeme_skip_keyboard(user_id))
+                    answer_callback(callback_id)
+                    return {"ok": True}
+
+                if action == "back":
+                    edit_message_text(chat_id, message_id,
+                        "😂 Як зробити мем?",
+                        textmeme_root_keyboard(user_id))
+                    answer_callback(callback_id)
+                    return {"ok": True}
+
+            # ── Текстовий мем: одна з 5 тем → ОДРАЗУ генерація з рандом підтемою ──
+            if cb_data.startswith("tmtheme_"):
+                parts      = cb_data.split("_")
+                user_id    = int(parts[1])
+                theme_idx  = int(parts[2])
                 theme_name = list(MEME_THEMES.keys())[theme_idx]
-                subtopics  = MEME_THEMES[theme_name]
-                subtopic   = random.choice(subtopics) if sub_raw == "random" else subtopics[int(sub_raw)]
-                pending_textmeme[user_id] = {"theme": theme_name, "subtopic": subtopic}
-                edit_message_text(chat_id, message_id,
-                    f"✅ Тема: <b>{theme_name}</b>\n"
-                    f"✅ Підтема: <b>{subtopic}</b>\n\n"
-                    "✍️ Напиши текст для мему — або натисни кнопку:",
-                    textmeme_skip_keyboard(user_id))
+                subtopic   = random.choice(MEME_THEMES[theme_name])
                 answer_callback(callback_id)
+                await _generate_text_meme_and_send(chat_id, user_id,
+                                                   theme_name, subtopic, user_text="")
                 return {"ok": True}
 
             # ── Текстовий мем: кнопка "Придумай сам" ──
@@ -1381,7 +1374,7 @@ async def webhook(request: Request):
                 if action == "meme":
                     # Крок 1 — вибір стилю для мему
                     edit_message_text(chat_id, message_id,
-                                      "😂 Крок 1 з 3 — Обери стиль фото для мему:",
+                                      "😂 Обери стиль фото — далі бот сам зробить жарт по фото:",
                                       meme_style_keyboard(user_id))
                     answer_callback(callback_id)
                     return {"ok": True}
@@ -1490,7 +1483,7 @@ async def webhook(request: Request):
             pending_photos[user_id] = file_id
 
             if caption in ["мем", "meme"]:
-                send_message(chat_id, "😂 Крок 1 з 3 — Обери стиль фото для мему:",
+                send_message(chat_id, "😂 Обери стиль фото — далі бот сам зробить жарт по фото:",
                              reply_markup=meme_style_keyboard(user_id))
             elif caption in ["опис", "describe", "що це"]:
                 send_message(chat_id, "⏳ Аналізую фото...")
@@ -1531,7 +1524,8 @@ async def webhook(request: Request):
                 "• 💬 Відповідати з бази знань\n"
                 "• 🌐 Шукати в інтернеті\n"
                 "• 🖼 Генерувати картинки — /img опис\n"
-                "• 😂 Меми: стиль + тема + підтема\n"
+                "• 😂 Меми по фото — бот сам ловить кут жарту\n"
+                "• 🎲 Рандомні меми без фото — /meme (сюрприз / тема / свій текст)\n"
                 "• 🖼 Демотиватори з фото\n"
                 "• ⚔️ Батл мемів — два варіанти + голосування\n"
                 "• 🎨 Переробляти фото у 10 стилях\n"
@@ -1549,6 +1543,7 @@ async def webhook(request: Request):
             pending_voices.pop(user_id, None)
             pending_textmeme.pop(user_id, None)
             meme_style_sel.pop(user_id, None)
+            meme_redo_ctx.pop(user_id, None)
             user_personas.pop(user_id, None)
             user_voice_reply.pop(user_id, None)
             send_message(chat_id, "🗑 Пам'ять очищена, режим скинуто!")
@@ -1580,8 +1575,8 @@ async def webhook(request: Request):
             return {"ok": True}
 
         if text in ["/meme", "мем", "зроби мем", "мем!"]:
-            send_message(chat_id, "😂 Обери тему для мему:",
-                         reply_markup=textmeme_themes_keyboard(user_id))
+            send_message(chat_id, "😂 Як зробити мем?",
+                         reply_markup=textmeme_root_keyboard(user_id))
             return {"ok": True}
 
         if text.startswith("/img"):
@@ -1601,11 +1596,19 @@ async def webhook(request: Request):
         meme_data = pending_textmeme.get(user_id)
         if meme_data:
             pending_textmeme.pop(user_id, None)
-            await _generate_text_meme_and_send(
-                chat_id, user_id,
-                meme_data["theme"], meme_data["subtopic"],
-                user_text=text
-            )
+            if meme_data.get("custom"):
+                # «Свій текст»: вживаємо текст юзера як тему-сім'я; підтеми нема.
+                await _generate_text_meme_and_send(
+                    chat_id, user_id,
+                    theme_name="✍️ Своє", subtopic=text,
+                    user_text="",
+                )
+            else:
+                await _generate_text_meme_and_send(
+                    chat_id, user_id,
+                    meme_data["theme"], meme_data["subtopic"],
+                    user_text=text,
+                )
             return {"ok": True}
 
         # ── База знань + інтернет ────────────────
@@ -1650,10 +1653,12 @@ async def webhook(request: Request):
 # ────────────────────────────────────────────
 # Генерація мему (спільна логіка)
 # ────────────────────────────────────────────
-async def _generate_meme(chat_id: int, user_id: int, file_id: str, theme_name: str, subtopic: str):
+async def _generate_meme(chat_id: int, user_id: int, file_id: str):
+    """Фото-мем: бот сам ловить тему з фото (theme_hint порожній).
+    Після генерації показує кнопку «🔄 Інший варіант»."""
     style_idx   = meme_style_sel.get(user_id)
     style_label = "без стилю" if style_idx is None else STYLES[style_idx]["label"]
-    send_message(chat_id, f"⏳ Генерую мем «{subtopic}» ({style_label})...")
+    send_message(chat_id, f"⏳ Генерую мем ({style_label})...")
     try:
         image_bytes = download_tg_photo(file_id)
 
@@ -1665,10 +1670,12 @@ async def _generate_meme(chat_id: int, user_id: int, file_id: str, theme_name: s
             else:
                 send_message(chat_id, "⚠️ Стиль не вдався, накладаю текст на оригінал.")
 
-        theme_hint  = f"{theme_name}: {subtopic}"
-        top, bottom = generate_meme_text(image_bytes, theme_hint)
+        # Бот сам обирає кут жарту з фото — theme_hint пустий
+        top, bottom = generate_meme_text(image_bytes)
         buf         = add_meme_text(image_bytes, top, bottom)
-        send_photo(chat_id, buf, caption=f"😂 {theme_name} — {subtopic}")
+        send_photo(chat_id, buf, caption="😂")
+        send_message(chat_id, "Хочеш ще один варіант — натисни:",
+                     reply_markup=meme_redo_keyboard(user_id))
     except Exception as e:
         logging.error(f"_generate_meme: {e}")
         send_message(chat_id, f"❌ Помилка: {e}")
@@ -1681,17 +1688,12 @@ async def _generate_meme_battle(chat_id: int, user_id: int, file_id: str):
     try:
         image_bytes = download_tg_photo(file_id)
 
-        # Дві випадкові теми для різноманіття
-        themes = list(MEME_THEMES.keys())
-        t1 = random.choice(themes)
-        t2 = random.choice([t for t in themes if t != t1] or themes)
-        s1 = random.choice(MEME_THEMES[t1])
-        s2 = random.choice(MEME_THEMES[t2])
-
-        # Описуємо фото один раз — обидва варіанти прив'язані до того ж вмісту
+        # Описуємо фото один раз — обидва варіанти прив'язані до того ж вмісту.
+        # Тем не задаємо — модель сама обирає кути жарту (з temperature 1.15
+        # два виклики природньо дають різні результати).
         scene = describe_photo_scene(image_bytes)
-        top1, bot1 = generate_meme_text(image_bytes, f"{t1}: {s1}", scene=scene)
-        top2, bot2 = generate_meme_text(image_bytes, f"{t2}: {s2}", scene=scene)
+        top1, bot1 = generate_meme_text(image_bytes, scene=scene)
+        top2, bot2 = generate_meme_text(image_bytes, scene=scene)
         buf_a = add_meme_text(image_bytes, top1, bot1)
         buf_b = add_meme_text(image_bytes, top2, bot2)
 

@@ -280,9 +280,47 @@ def photo_to_base64(image_bytes: bytes) -> str:
 # ────────────────────────────────────────────
 # Мем: генерація тексту через Groq vision
 # ────────────────────────────────────────────
-def generate_meme_text(image_bytes: bytes, theme_hint: str = "") -> tuple[str, str]:
+def describe_meme_scene(image_bytes: bytes) -> str:
+    """Короткий опис головного на фото (об'єкт, дія, настрій) — щоб мем чіплявся за фото."""
     b64 = photo_to_base64(image_bytes)
-    theme_instruction = f'\nТема мему: "{theme_hint}". Прив\'яжи текст до цієї теми!' if theme_hint else ""
+    try:
+        r = groq_client.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                    {"type": "text", "text": (
+                        "Що на фото? Українською, дуже коротко (1 речення): "
+                        "головний об'єкт або хто, що робить, вираз обличчя чи настрій."
+                    )}
+                ]
+            }],
+            max_tokens=60
+        )
+        scene = r.choices[0].message.content.strip()
+        logging.info(f"Meme scene: {scene!r}")
+        return scene
+    except Exception as e:
+        logging.error(f"describe_meme_scene: {e}")
+        return ""
+
+def generate_meme_text(image_bytes: bytes, theme_hint: str = "", scene: str | None = None) -> tuple[str, str]:
+    """Мем, прив'язаний САМЕ до вмісту фото. Тема (theme_hint) — лише кут зору.
+    scene можна передати готовим (для батлу), щоб не описувати фото двічі."""
+    b64 = photo_to_base64(image_bytes)
+    if scene is None:
+        scene = describe_meme_scene(image_bytes)
+
+    scene_line = f"На фото: {scene}\n" if scene else ""
+    if theme_hint:
+        theme_line = (
+            f'Тема-настрій для жарту: "{theme_hint}" — використай її як КУТ ЗОРУ, '
+            "але жарт ОБОВ'ЯЗКОВО має стосуватися саме того, що на фото.\n"
+        )
+    else:
+        theme_line = "Зроби жарт саме про те, що на фото.\n"
+
     try:
         response = groq_client.chat.completions.create(
             model="meta-llama/llama-4-scout-17b-16e-instruct",
@@ -291,7 +329,10 @@ def generate_meme_text(image_bytes: bytes, theme_hint: str = "") -> tuple[str, s
                 "content": [
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
                     {"type": "text", "text": (
-                        f"Ти генератор мемів. Придумай смішний мем-текст українською.{theme_instruction}\n"
+                        "Ти генератор мемів українською.\n"
+                        f"{scene_line}"
+                        f"{theme_line}"
+                        "Мем має бути зрозумілий саме для ЦЬОГО фото, а не загальний.\n"
                         "Відповідай СТРОГО у форматі без зайвого тексту:\n"
                         "ВЕРХ: короткий текст (макс 6 слів)\n"
                         "НИЗ: короткий текст (макс 6 слів)"
@@ -1616,8 +1657,10 @@ async def _generate_meme_battle(chat_id: int, user_id: int, file_id: str):
         s1 = random.choice(MEME_THEMES[t1])
         s2 = random.choice(MEME_THEMES[t2])
 
-        top1, bot1 = generate_meme_text(image_bytes, f"{t1}: {s1}")
-        top2, bot2 = generate_meme_text(image_bytes, f"{t2}: {s2}")
+        # Описуємо фото один раз — обидва варіанти прив'язані до того ж вмісту
+        scene = describe_meme_scene(image_bytes)
+        top1, bot1 = generate_meme_text(image_bytes, f"{t1}: {s1}", scene=scene)
+        top2, bot2 = generate_meme_text(image_bytes, f"{t2}: {s2}", scene=scene)
         buf_a = add_meme_text(image_bytes, top1, bot1)
         buf_b = add_meme_text(image_bytes, top2, bot2)
 

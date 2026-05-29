@@ -825,22 +825,26 @@ def load_auth_state():
         import json
         url = f"https://huggingface.co/datasets/{AUTH_DATASET_ID}/resolve/main/{AUTH_FILE}"
         r = requests.get(url, headers={"Authorization": f"Bearer {HF_TOKEN}"}, timeout=10)
+        if r.status_code == 404:
+            logging.warning(f"[AUTH] ℹ️ файл {AUTH_FILE} ще не існує — стартуємо з порожнім станом")
+            return
         if r.status_code != 200:
-            logging.info(f"Auth file not found (status {r.status_code}) — starting fresh")
+            logging.error(f"[AUTH] ❌ LOAD FAILED: HTTP {r.status_code} — {r.text[:120]}")
             return
         data = json.loads(r.text)
-        now  = time.time()
-        # одразу відсіюємо протерміновані, щоб у пам'ять не лізло сміття
+        now    = time.time()
+        loaded = 0
         for k, v in data.items():
             try:
                 expiry = float(v)
                 if expiry > now:
                     authorized_until[int(k)] = expiry
+                    loaded += 1
             except (ValueError, TypeError):
                 continue
-        logging.info(f"Auth state loaded: {len(authorized_until)} активних користувачів")
+        logging.warning(f"[AUTH] ✅ LOADED {loaded} active users from {AUTH_DATASET_ID}/{AUTH_FILE}")
     except Exception as e:
-        logging.error(f"load_auth_state: {e}")
+        logging.error(f"[AUTH] ❌ LOAD EXCEPTION: {e}")
 
 def save_auth_state():
     """Записуємо authorized_until у HF-датасет. Викликається після кожної зміни."""
@@ -857,9 +861,15 @@ def save_auth_state():
             repo_type="dataset",
             commit_message=f"update auth state ({len(cleaned)} users)",
         )
-        logging.info(f"Auth state saved: {len(cleaned)} users")
+        logging.warning(f"[AUTH] ✅ SAVED {len(cleaned)} users to {AUTH_DATASET_ID}/{AUTH_FILE}")
+        return True
     except Exception as e:
-        logging.error(f"save_auth_state: {e}")
+        logging.error(
+            f"[AUTH] ❌ SAVE FAILED: {e}. "
+            f"Найімовірніше HF_TOKEN не має WRITE-прав на {AUTH_DATASET_ID}. "
+            f"Перевір: https://huggingface.co/settings/tokens"
+        )
+        return False
 
 # Підвантажуємо збережені авторизації при старті модуля
 load_auth_state()
@@ -1645,6 +1655,26 @@ async def webhook(request: Request):
 
         if text == "/status":
             send_message(chat_id, f"✅ Доступ активний. Лишилось: <b>{days_left(user_id)} днів</b>.")
+            return {"ok": True}
+
+        if text == "/authstatus":
+            # Перевірка чи персистентність працює — пробуємо записати поточний стан
+            saved = save_auth_state()
+            in_list = user_id in authorized_until
+            info = (
+                f"📊 <b>Діагностика авторизації</b>\n\n"
+                f"• Активних користувачів у пам'яті: <b>{len(authorized_until)}</b>\n"
+                f"• Ти у списку: <b>{'так' if in_list else 'ні'}</b>\n"
+                f"• Тобі лишилось: <b>{days_left(user_id)} днів</b>\n"
+                f"• Запис у HF-датасет: <b>{'✅ працює' if saved else '❌ НЕ працює'}</b>\n"
+            )
+            if not saved:
+                info += (
+                    "\n⚠️ Якщо запис не працює — найімовірніше HF_TOKEN на Render "
+                    "не має WRITE-прав на датасет. Перевір токен на "
+                    "huggingface.co/settings/tokens"
+                )
+            send_message(chat_id, info)
             return {"ok": True}
 
         # ── Отримали фото ───────────────────────
